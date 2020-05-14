@@ -1,0 +1,56 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+
+x <- read.delim("~/Downloads/GSE113957_fpkm.txt")
+
+fpkm <- as.matrix(x[,-c(1:8)])
+
+rownames(fpkm) <- gsub("\\|.*", "",x$Annotation.Divergence)
+
+f <- function(x) {
+  if (diff(range(x)) == 0) list() else shapiro.test(x)$p.value
+}
+
+y <- unlist(apply(fpkm, 1, f))
+
+
+y[c("L3MBTL2","VAMP7","WDR55",'TMEM199','RBCK1',"PUM1","TBP","GUSB","OAZ1","CDKN1A","APOD","TFRC")]
+
+age <- as.numeric(sub("[Y-y].*" , "", sub(".*_" ,"" , sub("_[F-M;f-m].*", "",colnames(fpkm)))))
+
+fpkm.t <- as.data.frame(t(fpkm))
+
+fpkm.t$age <- age
+
+fpkmtidy <- fpkm.t %>%
+ pivot_longer(-age, names_to = "genes",values_to = "fpkm")
+
+fpkmtidy <- as.data.frame(fpkmtidy)
+fpkmtidy[fpkmtidy$age < 20,4] <- "<19"
+fpkmtidy[fpkmtidy$age >= 20 & fpkmtidy$age <40 ,4] <- "20-39"
+fpkmtidy[fpkmtidy$age >= 40 & fpkmtidy$age < 60 ,4] <- "40-59"
+fpkmtidy[fpkmtidy$age >= 60 ,4] <- ">60"
+
+colnames(fpkmtidy)[4] <- "group"
+
+fpkmtidy$group <-  factor(fpkmtidy$group, c("<19","20-39","40-59",">60"))
+
+gene <- c("L3MBTL2","WDR55",'TMEM199','RBCK1',"APOD")
+
+ggplot(subset(fpkmtidy, genes %in% gene),  aes(x = group, y = fpkm), ylab = "") +
+  geom_violin(aes(fill = group)) +
+  facet_wrap(~genes) +
+  scale_y_continuous(trans='log2') +
+  ylab("log2 FPKM") +
+  theme_bw()
+  
+
+```
+
+

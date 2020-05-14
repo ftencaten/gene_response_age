@@ -1,0 +1,166 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Modified version of "r_markdown_notebook.Rmd". The original file can be acessed at
+/usr/lib/rstudio/resources/templates/r_markdown_notebook_old.Rmd
+
+
+```{r Load libraries, message=FALSE}
+if(!require(here, quietly = F)) {
+        install.packages("here")
+        library(here)
+}
+if(!require(tidyverse, quietly = F)) {
+        install.packages("tidyverse")
+        library(tidyverse)
+}
+
+```
+
+```{r Load input files}
+tmm.degs <- read.delim(here("data","TMM_diff_expression_byAge_bySex_curettage.tsv"))
+
+ruvseq.degs <- read.delim(here("data","RUVSeq_diff_expression_byAge_bySex_curettage.tsv"))
+```
+
+```{r TMM DEGs}
+logFC = c(0.5849625, 1, 2) 
+FDR = c(0.1,0.05,0.01,0.001,0.0001)
+
+datalist <- list()
+k <- 1
+for (i in logFC) {
+  for (j in FDR) {
+    up.elderly.vs.children.f <- nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Children.F > i &
+                                                tmm.degs$FDR.Elderly.vs.Children.F < j,])
+    down.elderly.vs.children.f <-  nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Children.F < -i &
+                                                tmm.degs$FDR.Elderly.vs.Children.F < j,])
+    up.elderly.vs.children.m <- nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Children.M > i &
+                                                tmm.degs$FDR.Elderly.vs.Children.M < j,])
+    down.elderly.vs.children.m <-  nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Children.M < -i &
+                                                tmm.degs$FDR.Elderly.vs.Children.M < j,])
+    
+    up.elderly.vs.adults.f <- nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Adults.F > i &
+                                                tmm.degs$FDR.Elderly.vs.Adults.F < j,])
+    down.elderly.vs.adults.f <-  nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Adults.F < -i &
+                                                tmm.degs$FDR.Elderly.vs.Adults.F < j,])
+    up.elderly.vs.adults.m <- nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Adults.M > i &
+                                                tmm.degs$FDR.Elderly.vs.Adults.M < j,])
+    down.elderly.vs.adults.m <-  nrow(tmm.degs[tmm.degs$logFC.Elderly.vs.Adults.M < -i &
+                                                tmm.degs$FDR.Elderly.vs.Adults.M < j,])
+    
+    up.adults.vs.children.f <- nrow(tmm.degs[tmm.degs$logFC.Adults.vs.Children.F > i &
+                                                tmm.degs$FDR.Adults.vs.Children.F < j,])
+    down.adults.vs.children.f <-  nrow(tmm.degs[tmm.degs$logFC.Adults.vs.Children.F < -i &
+                                                tmm.degs$FDR.Adults.vs.Children.F < j,])
+    up.adults.vs.children.m <- nrow(tmm.degs[tmm.degs$logFC.Adults.vs.Children.M > i &
+                                                tmm.degs$FDR.Adults.vs.Children.M < j,])
+    down.adults.vs.children.m <-  nrow(tmm.degs[tmm.degs$logFC.Adults.vs.Children.M < -i &
+                                                tmm.degs$FDR.Adults.vs.Children.M < j,])
+    
+    
+    compar <- c(rep(c("Adults.vs.Children"),2), 
+            rep(c("Elderly.vs.Children"),2), 
+            rep(c("Elderly.vs.Adults"),2))
+
+    up <- c(up.adults.vs.children.f, up.adults.vs.children.m,
+            up.elderly.vs.children.f, up.elderly.vs.children.m,
+            up.elderly.vs.adults.f, up.elderly.vs.adults.m)
+
+    down <- c(down.adults.vs.children.f, down.adults.vs.children.m,
+              down.elderly.vs.children.f, down.elderly.vs.children.m,
+              down.elderly.vs.adults.f, down.elderly.vs.adults.m)
+
+    df <- data.frame(V1 = up,
+                     V2 = down)
+    
+    colnames(df) <- c(paste("Up_logFC",i,"FDR",j, sep="_"), 
+                      paste("Down_logFC",i,"FDR",j, sep="_"))
+    
+    datalist[[k]] <- df
+    k <- k + 1
+    
+  }
+}
+  
+out <-  do.call(cbind, datalist)
+
+names <- data.frame(Comparison = compar, Sex = rep(c("F","M"),3))
+
+df.tmm <- cbind(names,out)
+
+write.table(df.tmm, here("results","number_DEGs_TMM.tsv"), sep='\t',quote=F,row.names=F)
+
+```
+
+```{r RUVSeq DEGs}
+logFC = c(0.5849625, 1, 2) 
+FDR = c(0.1,0.05,0.01,0.001,0.0001)
+
+datalist <- list()
+k <- 1
+for (i in logFC) {
+  for (j in FDR) {
+    up.elderly.vs.children.f <- nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Children.F > i &
+                                                ruvseq.degs$FDR.Elderly.vs.Children.F < j,])
+    down.elderly.vs.children.f <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Children.F < -i &
+                                                ruvseq.degs$FDR.Elderly.vs.Children.F < j,])
+    up.elderly.vs.children.m <- nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Children.M > i &
+                                                ruvseq.degs$FDR.Elderly.vs.Children.M < j,])
+    down.elderly.vs.children.m <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Children.M < -i &
+                                                ruvseq.degs$FDR.Elderly.vs.Children.M < j,])
+    
+    up.elderly.vs.adults.f <- nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Adults.F > i &
+                                                ruvseq.degs$FDR.Elderly.vs.Adults.F < j,])
+    down.elderly.vs.adults.f <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Adults.F < -i &
+                                                ruvseq.degs$FDR.Elderly.vs.Adults.F < j,])
+    up.elderly.vs.adults.m <- nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Adults.M > i &
+                                                ruvseq.degs$FDR.Elderly.vs.Adults.M < j,])
+    down.elderly.vs.adults.m <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Elderly.vs.Adults.M < -i &
+                                                ruvseq.degs$FDR.Elderly.vs.Adults.M < j,])
+    
+    up.adults.vs.children.f <- nrow(ruvseq.degs[ruvseq.degs$logFC.Adults.vs.Children.F > i &
+                                                ruvseq.degs$FDR.Adults.vs.Children.F < j,])
+    down.adults.vs.children.f <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Adults.vs.Children.F < -i &
+                                                ruvseq.degs$FDR.Adults.vs.Children.F < j,])
+    up.adults.vs.children.m <- nrow(ruvseq.degs[ruvseq.degs$logFC.Adults.vs.Children.M > i &
+                                                ruvseq.degs$FDR.Adults.vs.Children.M < j,])
+    down.adults.vs.children.m <-  nrow(ruvseq.degs[ruvseq.degs$logFC.Adults.vs.Children.M < -i &
+                                                ruvseq.degs$FDR.Adults.vs.Children.M < j,])
+    
+    
+    compar <- c(rep(c("Adults.vs.Children"),2), 
+            rep(c("Elderly.vs.Children"),2), 
+            rep(c("Elderly.vs.Adults"),2))
+
+    up <- c(up.adults.vs.children.f, up.adults.vs.children.m,
+            up.elderly.vs.children.f, up.elderly.vs.children.m,
+            up.elderly.vs.adults.f, up.elderly.vs.adults.m)
+
+    down <- c(down.adults.vs.children.f, down.adults.vs.children.m,
+              down.elderly.vs.children.f, down.elderly.vs.children.m,
+              down.elderly.vs.adults.f, down.elderly.vs.adults.m)
+
+    df <- data.frame(V1 = up,
+                     V2 = down)
+    
+    colnames(df) <- c(paste("Up_logFC",i,"FDR",j, sep="_"), 
+                      paste("Down_logFC",i,"FDR",j, sep="_"))
+    
+    datalist[[k]] <- df
+    k <- k + 1
+    
+  }
+}
+  
+out <-  do.call(cbind, datalist)
+
+names <- data.frame(Comparison = compar, Sex = rep(c("F","M"),3))
+
+df.ruvseq <- cbind(names,out)
+
+write.table(df.ruvseq, here("results","number_DEGs_RUVSeq.tsv"), sep='\t',quote=F,row.names=F)
+
+```
+

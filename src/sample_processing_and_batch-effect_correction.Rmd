@@ -1,0 +1,260 @@
+  ---
+title: "R Notebook"
+output: html_notebook
+---
+
+**Load required libraries**
+```{r Load libraries, message = FALSE}
+if (!require("here", quietly = TRUE)) install.packages("here")
+if (!require("edgeR", quietly = TRUE)) BiocManager::install("edgeR")
+if (!require("sva", quietly = TRUE)) install.packages("sva")
+if (!require("ggfortify", quietly = TRUE)) install.packages("ggfortify")
+if (!require("scater", quietly = TRUE)) BiocManager::install("scater")
+if (!require("scBatch", quietly = TRUE)) devtools::install_github('tengfei-emory/scBatch')
+```
+
+
+**Read input files**
+```{r}
+#Children
+children_gambia18 <- read.delim(here("data", "children", "Children_GAMBIA_2018_swab.tsv"))
+children_UK_cur <- read.delim(here("data", "children", "Children_UK-LSMT_curettage.tsv"))
+children_UK_swab <- read.delim(here("data", "children", "Children_UK-LSMT_swab.tsv"))
+
+#Adults
+adults_UK_ICL_cur <- read.delim(here("data", "adults" ,"Adults_UK-ICL_curettage.tsv"))
+adults_UK_ICL_sam <- read.delim(here("data", "adults" ,"Adults_UK-ICL_SAM-strip.tsv"))
+adults_laiv1  <- read.delim(here("data", "adults", "LAIV1_baseline_counts_SimonData.txt"))
+adults_laiv2  <- read.delim(here("data", "adults", "LAIV2_baseline_counts_SimonData.txt"))
+
+#Elderly
+elderly_agesbatch1 <- read.delim(here("data", "adults", "AGES_batch1_gene_symbol.tsv"))
+
+#phenodata file for adults_agesbatch1
+phenodata_agesbatch1 = read.delim(here('data', 'phenodata_batch1.tsv'))
+
+#Gene length file to FPKM normalization on scBatch
+gene_length <- read.delim(here('data', "GC_lengths.tsv"))
+```
+
+
+"Children_GAMBIA_2018_swab.tsv" and "AGES_batch1_gene_symbol.tsv" only have the Gene Symbol so is necessary to add the Ensembl symbol to merge all datasets. Genes specified by more than one Ensembl symbol (e.g., 5S_rRNA -> 17 Ensembl symbols) were duplicated in both datasets.
+
+
+**Merges files and create phenodata file**
+```{r}
+# Select samples samples from batch1 (Elderly data has batch1 AND batch2)
+elderly_agesbatch1 = subset(elderly_agesbatch1, 
+                           select = c(colnames(elderly_agesbatch1)[1],
+                                      as.vector(phenodata_agesbatch1$sample_id)))
+
+# Add Ensembl symbol to elderly_agesbatch1 using IDs from children_UK_swab
+elderly_agesbatch1 <- merge(children_UK_swab[,1:2], elderly_agesbatch1, by.x = 'nameofG', by.y = 'Symbol' , all.y= T)
+
+# Add Ensembl symbol to children_gambia18 using IDs from children_UK_swab
+children_gambia18 <- merge(children_UK_swab[,1:2], children_gambia18, by = 'nameofG', all.y= T)
+
+
+adults <- merge(adults_UK_ICL_cur, adults_UK_ICL_sam[,-2], by = 'ID')
+adults <- merge(adults, adults_laiv1, by.x = 'ID', by.y = 'X', all = F)
+adults <- merge(adults, adults_laiv2, by.x = 'ID', by.y = 'X')
+adults <- merge(adults, elderly_agesbatch1[,-1], by = 'ID', all = F)
+
+children <- merge(children_UK_cur, children_UK_swab[,-2], by = 'ID')
+children <- merge(children, children_gambia18[,-1], by='ID')
+
+adults.children <- merge(adults, children[,-2], by='ID', all = F)
+
+rownames(adults.children) <- adults.children$ID
+
+#write.table(adults.children, 
+#            here("data", "gene_counts_merged_datasets_children_adults_elderly.txt"),
+#            sep='\t',quote=F,row.names = F)
+```
+
+```{r}
+adults.children.cpm <- as.data.frame(edgeR::cpm(adults.children[,-c(1:2)]))
+
+adults.children.cpm <- cbind(adults.children[,1:2],adults.children.cpm)
+
+sexgenes <- t(adults.children.cpm[adults.children.cpm$nameofG %in%
+                                    c("RPS4Y1","KDM5D","XIST"),-c(1:2)])
+
+sexgenes.kmeans <- kmeans(sexgenes,2)
+
+out <- data.frame(label = names(sexgenes.kmeans$cluster), sex = sexgenes.kmeans$cluster)
+out$sex <-  ifelse(out$sex == 1,'F','M')
+
+write.table(out, here("data","sex_definition.txt"), sep='\t',quote=F,row.names=F)
+
+```
+
+```{r}
+#Dataframe with sample info - Phenodata
+children_UK_swab_df <- data.frame(label = colnames(children_UK_swab[,-c(1:2)]), Sample  = 'UK_swab', Group = 'Children', timepoint = 'baseline')
+children_UK_cur_df <- data.frame(label = colnames(children_UK_cur[,-c(1:2)]), Sample  = 'UK_cur', Group = "Children", timepoint = 'baseline')
+children_gambia18_df <- data.frame(label = colnames(children_gambia18[,-c(1:2)]), Sample  = 'Gambia18', Group = "Children", timepoint = 'baseline')
+adults_UK_ICL_sam_df <- data.frame(label = colnames(adults_UK_ICL_sam[,-c(1:2)]), Sample  = 'UK_ICL_sam', Group = "Adults", timepoint = 'baseline')
+adults_UK_ICL_cur_df <- data.frame(label = colnames(adults_UK_ICL_cur[,-c(1:2)]), Sample  = 'UK_ICL_cur', Group = "Adults", timepoint = 'baseline')
+adults_laiv1_df <- data.frame(label = colnames(adults_laiv1[,-1]), Sample  = 'Laiv1', Group = "Adults", timepoint = 'baseline')
+adults_laiv2_df <- data.frame(label = colnames(adults_laiv2[,-1]), Sample  = 'Laiv2', Group = "Adults", timepoint = 'baseline')
+elderly_agesbatch1_df <- data.frame(label = colnames(elderly_agesbatch1[,-c(1:2)]), 
+                                    Sample  = 'ages_batch1', Group = "Elderly", 
+                                    timepoint = phenodata_agesbatch1[match(colnames(elderly_agesbatch1[,-c(1:2)]), phenodata_agesbatch1$sample_id),6])
+
+adults.children_df = rbind(children_UK_swab_df, children_UK_cur_df, 
+                           children_gambia18_df, adults_UK_ICL_cur_df, 
+                           adults_UK_ICL_sam_df, adults_laiv1_df, 
+                           adults_laiv2_df, elderly_agesbatch1_df)
+
+#write.table(adults.children_df, here("data", "sample_information.txt"), 
+#            sep='\t',quote=F,row.names = F)
+adults.children_df <- read.delim(here("data","sample_information.txt"))
+adults.children <- read.delim(here("data",
+                                   "gene_counts_merged_datasets_adults_children_older.txt"))
+fpkm <- read.delim(here("results","FPKM_merged_datasets_children_adults_elderly.txt"))
+```
+
+**Batch effect correction with ComBat-seq**
+```{r}
+###Sample selection
+#Select samples collected via curretage
+method <- c("UK_ICL_cur","ages_batch1","UK_cur")
+
+adults.children_df <- read.delim(here("data","sample_information.txt"))
+
+adults.children_df <- adults.children_df[adults.children_df$timepoint == "baseline" &
+                                           adults.children_df$sampling.method == "curettage",]
+adults.children <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly.txt"))
+
+rownames(adults.children) <- adults.children$ID
+adults.children <- subset(adults.children, select = as.vector(adults.children_df$label))
+
+#Select baseline samples and collected via curretage on phenodata file
+adults.children_df <- adults.children_df[adults.children_df$timepoint == "baseline" &
+                                           adults.children_df$Sample %in% method,]
+
+#Select baseline samples on gene count file
+rownames(adults.children) <- adults.children$ID
+adults.childrensub <- subset(adults.children, select = as.vector(adults.children_df$label))
+
+#Drop old factors
+adults.children_df$Sample <- factor(adults.children_df$Sample)
+
+#Combat-seq correction
+adjusted_counts <- ComBat_seq(as.matrix(adults.children), batch=adults.children_df$Sample)
+
+adjusted_counts$ID <- rownames(adjusted_counts)
+
+adjusted_counts <- merge(gene_length, adjusted_counts, by="row.names", all=F)
+
+adjusted_counts_fpkm <- as.data.frame(calculateFPKM(adjusted_counts[,-c(1:3)], adjusted_counts$Length))
+
+adjusted_counts_tpm <- as.data.frame(calculateTPM(adjusted_counts[,-c(1:3)], adjusted_counts$Length))
+
+rownames(adjusted_counts_fpkm) <- adjusted_counts$Row.names
+rownames(adjusted_counts_tpm) <- adjusted_counts$Row.names
+#Filter normalized gene counts 
+#Keep genes with cpm >= cpm.threshold at least in percentage_samples 
+percentage_samples = 0.5
+fpkm.threshold = 1
+keep = rowSums(adjusted_counts_fpkm > fpkm.threshold) > dim(adults.children_df )[1]*percentage_samples 
+
+
+adjusted_counts_fpkm = adjusted_counts_fpkm[keep,]
+
+adjusted_counts_fpkm$label <- rownames(adjusted_counts_fpkm)
+adjusted_counts_fpkm <- merge(adults.children[,1:2], adjusted_counts_fpkm, by.x='ID',by.y='label',all=F)
+
+
+write.table(adjusted_counts_fpkm, here('results',
+                                       "FPKM_ajusted_children_adults_elderly_Combat-seq.txt"),
+            sep='\t',quote=F,row.names = F)
+
+##TPM
+percentage_samples = 0.5
+tpm.threshold = 1
+keep = rowSums(adjusted_counts_tpm > tpm.threshold) > dim(adults.children_df )[1]*percentage_samples 
+adjusted_counts_tpm = adjusted_counts_tpm[keep,]
+
+adjusted_counts_tpm$label <- rownames(adjusted_counts_tpm)
+adjusted_counts_tpm <- merge(adults.children[,1:2], adjusted_counts_tpm, by.x='ID',by.y='label',all=F)
+
+
+write.table(adjusted_counts_tpm, here('results',
+                                       "TPM_ajusted_children_adults_elderly_Combat-seq.txt"),
+            sep='\t',quote=F,row.names = F)
+
+```
+
+# FPKM normalization
+```{r FPKM norm}
+adults.children <- merge(gene_length, adults.children, by="row.names", all=F)
+
+fpkm <- as.data.frame(calculateFPKM(adults.children[,-c(1:5)], adults.children$Length))
+
+fpkm <- cbind(adults.children[,c(4:5)],fpkm)
+
+write.table(fpkm, here("results","FPKM_merged_datasets_children_adults_elderly.txt"), 
+            sep= '\t', quote=F, row.names=F)
+```
+
+
+**Batch effect correction with scBatch**
+```{r}
+
+###Sample selection
+#Select samples collected via curretage
+method <- c("UK_ICL_cur","ages_batch1","UK_cur")
+
+#Select baseline samples and collected via curretage on phenodata file
+adults.children_df <- adults.children_df[adults.children_df$timepoint == "baseline" &
+                                           adults.children_df$Sample %in% method,]
+
+#Select baseline samples on gene count file
+rownames(fpkm) <- fpkm$ID
+fpkmsub <- subset(fpkm, select = as.vector(adults.children_df$label))
+
+#Filter by expression
+keep <- rowSums(fpkmsub > 1) > ncol(fpkmsub)*0.5
+fpkmsub <- fpkmsub[keep,]
+
+adults.children_df$Sample <- factor(adults.children_df$Sample)
+batch <- adults.children_df$Sample
+
+correctedD <- QuantNorm(fpkmsub, as.numeric(as.factor(batch)),
+                        logdat=F,method='row/column',cor_method='pearson',max=100)
+
+fpkm_adj <-scBatchCpp(c=as.matrix(fpkmsub), d=correctedD, w=diag(ncol(fpkm)), m=1, max=1000,
+                             tol=1e-10, step=0.0001, derif=scBatch::derif, verbose=F)
+
+fpkm_adj <- as.data.frame(fpkm_adj)
+colnames(fpkm_adj) <- colnames(fpkmsub)
+fpkm_adj$ID <- rownames(fpkmsub)
+ 
+out <- merge(fpkm[,1:2], fpkm_adj, by = "ID", all=F)
+
+write.table(out, here("results","FPKM_ajusted_children_adults_elderly_scBatch.txt"),
+            sep="\t", quote=F, row.names=F)
+
+t.correctedmatrix <- as.data.frame(t(correctedmatrix))
+t.correctedmatrix$label <- rownames(t.correctedmatrix)
+
+t.correctedmatrix <- merge(adults.children_df, t.correctedmatrix, by = 'label')
+
+#PCA
+prcom.correctedmatrix <- prcomp(t.correctedmatrix[,-c(1:3)])
+
+autoplot(prcom.correctedmatrix, t.correctedmatrix, shape = 'Group', 
+         colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15)
+
+correctedmatrix <- as.data.frame(correctedmatrix)
+correctedmatrix$ensemblID <- rownames(correctedmatrix)
+
+x <- merge(children_UK_swab[,1:2], correctedmatrix, by.x = 'ID', by.y = 'ensemblID' , all.x= F)
+
+#write.table(x, here('results',
+#                    'gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_scBatch_kendall.txt'), sep='\t',quote=F,row.names = F)
+```

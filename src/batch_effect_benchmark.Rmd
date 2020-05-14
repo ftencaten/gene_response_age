@@ -1,0 +1,62 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+source('load_libraries.R')
+
+install.packages("remotes")
+
+remotes::install_github("jsomekh/BCeF_")
+library(BCeF)
+
+```
+
+**Read files**
+```{r}
+rawcounts <- read.delim(here("data","gene_counts_merged_datasets_adults_children.txt"))
+
+#Ensembl ID -> Entrez ID
+id = read.delim(here('data', "ensembl-ID_to_entrezID_v2.txt"),head=F)
+
+# Blood cooexpression network gold standart from GIANT
+gs = read.delim(here('data', 'blood_gold_standart_giant.dat'), head=F)
+
+
+#Phenodata
+pd = read.delim(here('data',"sample_information.txt"))
+```
+
+
+**Merge files**
+```{r}
+gs <- merge(gs, id,by='V1',all=F)
+gs <- merge(gs, id, by.x='V2.x',by.y="V1",all=F )
+
+gs <- gs[,c('V2','V2.y','V3')]
+
+
+#remove duplication
+#dpl = names(which(table(rawcountsentrez$V1) == 2) ==T)
+#rawcountsentrez <- rawcountsentrez[!(rawcountsentrez$V1 %in% dpl),]
+
+rownames(rawcounts) <- rawcounts$V1
+rawcounts <- rawcounts[,-c(1:2)]
+rawcounts = rawcounts[,colnames(rawcounts) %in% pd$label]
+
+pd = pd[pd$label %in% colnames(rawcounts),]
+rownames(pd) <- pd$label
+pd <- pd[,2:3]
+pd <- pd[colnames(rawcounts),]
+```
+
+```{r}
+plotBCeF(input.edata = rawcounts,
+         input.covariates.df = pd,
+         input.gold.standard = gs,
+         input.edata.description = 'Raw Data',
+         input.adjustment.method.description = "No adjustment")
+```
+
+

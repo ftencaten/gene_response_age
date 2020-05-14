@@ -1,0 +1,148 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+source('load_libraries.R')
+
+phenodata = read.delim(here('data', "sample_information.txt"))
+
+countspearson = read.delim(here('results','gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_scBatch_pearson.txt'))
+
+countscombat = read.delim(here('results','gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_Combat-seq.txt'))
+
+countsfpkm = read.delim(here('results','FPKM_merged_datasets_children_adults_older.txt'))
+```
+
+**Prepare datasets**
+```{r}
+genenames = countspearson[,1:2]
+
+#rownames(countscombat) <- countscombat$Symbol
+#countscombat = edgeR::cpm(countscombat[,-1]) # Normalization with CPM
+#countscombat = as.data.frame(t(countscombat))
+#countscombat$label = rownames(countscombat)
+#countscombat = merge(phenodata, countscombat, by='label')
+#countscombat$Group <- relevel(countscombat$Group, "Children")
+
+rownames(countspearson) <- countspearson$ID
+countspearson = as.data.frame(t(countspearson[,-c(1:2)]))
+countspearson$label = rownames(countspearson)
+countspearson = merge(phenodata, countspearson, by='label')
+countspearson$Group <- relevel(countspearson$Group, "Children")
+
+rownames(countsfpkm) <- countsfpkm$ID
+countsfpkm = as.data.frame(t(countsfpkm[,-c(1:2)]))
+countsfpkm$label = rownames(countsfpkm)
+countsfpkm = merge(phenodata, countsfpkm, by='label')
+countsfpkm$Group <- relevel(countsfpkm$Group, "Children")
+
+## Filter
+#percentage_samples = 0.5
+#cpm.threshold = 1
+#keepcombat = colSums(countscombat[,-c(1:3)] > cpm.threshold) > 427*percentage_samples
+#keeppearson = colSums(countspearson[,-c(1:3)] > cpm.threshold) > 427*percentage_samples 
+
+#keep = keepcombat & keeppearson
+
+#x = c(TRUE, TRUE, TRUE)
+#names(x) = c('label',"Sample","Group")
+#keep = c(x,keep)
+
+#countscombat <- countscombat[,keep]
+#countspearson <-  countspearson[,keep]
+countspearson <- countspearson[,colnames(countspearson) %in% colnames(countsfpkm)]
+```
+
+```{r}
+
+fc <- function(x){
+  out <- NULL
+  for(i in 1:ncol(x)) {
+    adults_children <- log2(x["Adults",i]/x["Children",i])
+    older_children <- log2(x["Older",i]/x["Children",i])
+    older_adults <- log2(x["Older",i]/x["Adults",i])
+    
+    gene <- rbind(adults_children, older_children,older_adults)
+    colnames(gene) <- colnames(x)[i]
+    
+    out <- cbind(out, gene)
+  }
+  return(out)
+}
+
+#countscombat.kt  = apply(countscombat[,-c(1:3)], 2, 
+                         #function(x) kruskal.test(x,countscombat[,3])$p.value)
+#countscombat.pwt = apply(countscombat[,-c(1:3)], 2, 
+                         #function(x)  unmatrix(pairwise.wilcox.test(x,countscombat[,3], #p.adjust.method = "BH")$p.value))
+
+#countscombat.pwt = countscombat.pwt[-3,]
+
+countsfpkm.kt  = apply(countsfpkm[,-c(1:3)], 2, 
+                         function(x) kruskal.test(x,countsfpkm[,3])$p.value)
+
+countsfpkm.pwt = apply(countsfpkm[,-c(1:3)], 2, 
+                         function(x)  unmatrix(pairwise.wilcox.test(x,countsfpkm[,3], p.adjust.method = "BH")$p.value))
+
+countsfpkm.pwt = countsfpkm.pwt[-3,]
+
+countsfpkm.median <- apply(countsfpkm[,-c(1:3)], 2, function (x) tapply(x, countsfpkm$Group, median))
+
+countsfpkm.foldchange <- fc(countsfpkm.median)
+
+#
+
+countspearson.kt  = apply(countspearson[,-c(1:3)], 2, 
+                         function(x) kruskal.test(x,countspearson[,3])$p.value)
+
+countspearson.pwt = apply(countspearson[,-c(1:3)], 2, 
+                         function(x)  unmatrix(pairwise.wilcox.test(x,countspearson[,3], p.adjust.method = "BH")$p.value))
+
+countspearson.pwt = countspearson.pwt[-3,]
+
+
+countspearson.median <- apply(countspearson[,-c(1:3)], 2, function (x) tapply(x, countspearson$Group, median))
+
+countspearson.foldchange <- fc(countspearson.median)
+
+#countscombat.stat = rbind(countscombat.kt, countscombat.pwt)
+
+countsfpkm.stat <- rbind(countsfpkm.kt, countsfpkm.pwt,
+                        countsfpkm.median, countsfpkm.foldchange)
+
+countspearson.stat <- rbind(countspearson.kt, countspearson.pwt, 
+                           countspearson.median, countspearson.foldchange)
+
+rownames(countsfpkm.stat) <- c('FPKM_KW_pv', 'FPKM_Wilcox_Adults:Children_pv',
+                               'FPKM_Wilcox_Older:Children_pv', 'FPKM_Wilcox_Older:Adults_pv',
+                               "FPKM_Children", "FPKM_Adults", "FPKM_Older",
+                               "FPKM_log2FC_Adults:Children", "FPKM_log2FC_Older:Children",
+                               "FPKM_log2FC_Older:Adults")
+
+rownames(countspearson.stat) <- c('scBatch_KW_pv', 'scBatch_Wilcox_Adults:Children_pv',
+                                 'scBatch_Wilcox_Older:Children_pv',
+                                 'scBatch_Wilcox_Older:Adults_pv',
+                               "scBatch_Children", "scBatch_Adults", "scBatch_Older",
+                               "scBatch_log2FC_Adults:Children", "scBatch_log2FC_Older:Children",
+                               "scBatch_log2FC_Older:Adults")
+
+#out = as.data.frame(t(rbind(countscombat.stat, countspearson.stat)))
+out <- as.data.frame(t(rbind(countsfpkm.stat, countspearson.stat)))
+
+out$ensemblID <- rownames(out)
+
+z <- merge(genenames, out, by.x = 'ID', by.y = 'ensemblID', all=F)
+
+write.table(z, here('results','Kruskal-Wallis_test_log2FC_FPKM_scBatch_genes.txt'),
+            sep='\t',quote=F,row.names=F)
+
+
+f <- function(x) {
+  if (diff(range(x)) == 0) list() else shapiro.test(x)$p.value
+}
+
+h <- apply(countsfpkm[,-c(1:3)], 2, f)
+
+```
+

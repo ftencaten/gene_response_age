@@ -1,0 +1,21 @@
+#Check if necessary libraries are installed, if not, install it and load it.
+
+if (!require("here")) install.packages("here")
+if (!require("edgeR")) install.packages("edgeR")
+if (!require("RColorBrewer")) install.packages("RColorBrewer")
+if (!require("ggfortify")) install.packages("ggfortify")
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("sva")) install.packages("sva")
+if (!require("biomaRt")) BiocManager::install("biomaRt")
+if (!require("RankProd")) BiocManager::install("RankProd")
+if (!require("gdata")) install.packages("gdata")
+library(ggpubr)
+
+#if (!require("tidyverse")) install.packages("tidyverse")
+#if (!require("ggpubr")) install.packages("ggpubr")
+#if (!require("rstatix")) install.packages("rstatix")
+library(scBatch)
+library(QuantNorm)
+library(splatter)
+library(scater)
+library(rgl)

@@ -1,0 +1,66 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+source('load_libraries.R')
+
+
+phenodata = read.delim(here('data', "sample_information.txt"))
+
+countspearson = read.delim(here('results','gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_scBatch_pearson.txt'))
+
+countsspearman = read.delim(here('results','gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_scBatch_spearman.txt'))
+```
+
+
+```{r}
+genes = c("ENSG00000130234","ENSG00000232810","ENSG00000136244")
+
+countspearson = countspearson[countspearson$ID %in% genes,]
+rownames(countspearson) = countspearson$ID
+countspearson = as.data.frame(t(log2(countspearson[,-c(1:2)])))
+countspearson$label = rownames(countspearson)
+countspearson = merge(phenodata, countspearson, by='label')
+countspearson$Group <- relevel(countspearson$Group, 'Children')
+
+countsspearman = countsspearman[countsspearman$ID %in% genes,]
+rownames(countsspearman) = countsspearman$ID
+countsspearman = as.data.frame(t(log2(countsspearman[,-c(1:2)])))
+countsspearman$label = rownames(countsspearman)
+countsspearman = merge(phenodata, countsspearman, by='label')
+countsspearman$Group <- relevel(countsspearman$Group, 'Children')
+
+```
+
+```{r}
+library(ggpubr)
+## Spearman
+ggviolin(countsspearman, x='Group',y='ENSG00000130234', 
+#         facet.by = c('Age...14y'),
+         color='black',
+         legend= '',
+         add=c('boxplot'),
+         fill='Group',
+#         panel.labs = list(Age...14y = c("Adult (> 14y)","Pediatric (< 14y)")),
+         add.params = list(fill = "white"),
+         ylab = 'ACE2 log2 adjusted CPM') +
+# stat_compare_means(comparisons = list(c('0','1')), method = "t.test",label.y = 990000)  +
+  scale_x_discrete(labels=c('Children','Adults', 'Older'))
+
+## Pearson
+ggviolin(countspearson, x='Group',y='ENSG00000130234', 
+#         facet.by = c('Age...14y'),
+         color='black',
+         legend= '',
+         add=c('boxplot'),
+         fill='Group',
+#         panel.labs = list(Age...14y = c("Adult (> 14y)","Pediatric (< 14y)")),
+         add.params = list(fill = "white"),
+         ylab = 'ACE2 log2 adjusted CPM') +
+# stat_compare_means(comparisons = list(c('0','1')), method = "t.test",label.y = 990000)  +
+  scale_x_discrete(labels=c('Children','Adults', 'Older'))
+
+```
+

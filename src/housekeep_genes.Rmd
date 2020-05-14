@@ -1,0 +1,473 @@
+---
+title: "Nasal gene expression - Children/Adults/Adults-Older"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+
+## Load libraries
+```{r Load libraries, message = FALSE}
+if (!require("here", quietly = TRUE)) install.packages("here")
+if (!require("ggpubr", quietly = TRUE)) install.packages("ggpubr")
+if (!require("ggfortify", quietly = TRUE)) install.packages("ggfortify")
+if (!require("RColorBrewer", quietly = TRUE)) install.packages("RColorBrewer")
+if (!require("scater", quietly = TRUE)) BiocManager::install("scater")
+```
+
+
+## Read input files
+```{r Read input files, results='hide', linewidth=60}
+#Gene count files
+#genecounts_upc <- read.delim(here("data", 
+#                                  "gene_counts_merged_datasets_adults_children_older_upc.txt"))
+
+genecounts_raw <- read.delim(here("data", 
+                                  "gene_counts_merged_datasets_adults_children_older.txt"))
+
+genecounts_fpkm <- read.delim(here('results',
+                                   'FPKM_merged_datasets_children_adults_older.txt'))
+
+#genecounts_fpkmhk <- read.delim(here("data",
+#                  "FPKM_merged_datasets_children_adults_older_normalized_by_housekeeping.tsv"))
+
+genecounts_combat <- read.delim(here('results',
+                                     'TPM_ajusted_children_adults_elderly_Combat-seq.txt'))
+
+genecounts_scBatch <- read.delim(here('results','FPKM_ajusted_children_adults_elderly_scBatch.txt'))
+
+#Phenodata
+phenodata <- read.delim(here('data','sample_information.txt'))
+
+#Phenodata from batch1 (Older)
+phenodata_batch1 <- read.delim(here('data', 'phenodata_batch1.tsv'))
+
+#Effective gene size for FPKM normalization
+gene_length <- read.delim(here('data', "GC_lengths.tsv"))
+```
+
+OBS.: Ages from Gambia individuals is represented in  months, it's necessary adjust to years.
+
+```{r Add ages and sex to phenodata, results='hide'}
+
+uk_icl <- uk_icl[,1:3]
+colnames(uk_icl) <- c("subid","age","sex")
+
+gambia <- gambia[,c(1,6,5)]
+colnames(gambia) <- c("subid","age","sex")
+gambia$age <- floor(gambia$age/12) #Tansform months to years
+
+older <- phenodata_batch1[,c(1,9,8)]
+colnames(older) <- c("subid","age","sex")
+
+agesex <- rbind(uk_icl,gambia,older)
+
+phenodata$subid <- gsub("\\..*", "", phenodata$label)
+phenodata$subid <- gsub("_V0", "", phenodata$subid)
+
+phenodata <- merge(phenodata, agesex, by = 'subid', all.x = T)
+
+x <- phenodata[!(phenodata$subid %in% 
+                       phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1]), ]
+
+```
+
+## Normalize adjusted raw counts from Combat-seq with FPKM
+```{r FPKM Combat-seq counts, results='hide'}
+rownames(genecounts_combat) <- genecounts_combat$Symbol
+
+genecounts_combat <- as.data.frame(calculateFPKM(genecounts_combat[,-1],
+                                 gene_length[match(rownames(genecounts_combat),
+                                                   rownames(gene_length)),1]))
+```
+
+## Filter
+Use genes from "genecounts_fpkm" to all datasets. This genes show FPKM > 1 in more than 50% of samples
+```{r Filter genes and samples, results='hide'}
+rownames(genecounts_upc) <- genecounts_upc$ID
+gc_upc <- genecounts_upc[match(genecounts_fpkm$ID, 
+                               rownames(genecounts_upc)),-1]
+
+# remove samples D2 and D9 from batch1 (Older)
+gc_upc <- gc_upc[, !(colnames(gc_upc) %in% 
+                       phenodata[phenodata$timepoint != 'baseline',1])]
+
+
+
+
+rownames(genecounts_raw) <- genecounts_raw$ID
+gc_raw <- genecounts_raw[match(genecounts_fpkm$ID, 
+                               rownames(genecounts_raw)),-c(1:2)]
+
+# remove samples D2 and D9 from batch1 (Older)
+gc_raw <- gc_raw[, !(colnames(gc_raw) %in% 
+                       phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1])]
+
+
+rownames(genecounts_combat) <- genecounts_combat$ID
+gc_combat <- genecounts_combat[,-c(1:2)]
+
+gc_combat <- genecounts_combat[match(genecounts_fpkm$ID, 
+                                     rownames(genecounts_combat)),]
+
+# remove samples D2 and D9 from batch1 (Older)
+gc_combat <- gc_combat[, !(colnames(gc_combat) %in% 
+                             phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1])]
+
+rownames(genecounts_scBatch) <- genecounts_scBatch$ID
+gc_scbatch <- genecounts_scBatch[,-c(1:2)]
+gc_scbatch <- genecounts_scBatch[match(genecounts_fpkm$ID,
+                                       rownames(genecounts_scBatch)),-c(1:2)]
+# remove samples D2 and D9 from batch1 (Older)
+gc_scbatch <- gc_scbatch[, !(colnames(gc_scbatch) %in% 
+                               phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1])]
+
+rownames(genecounts_fpkm) <- genecounts_fpkm$ID
+gc_fpkm <- genecounts_fpkm[,-c(1:2)]
+
+
+genecounts_fpkmhk <- merge(genecounts_raw[,1:2], genecounts_fpkmhk, by.x='nameofG', by.y='Symbol')
+rownames(genecounts_fpkmhk) <- genecounts_fpkmhk$ID
+gc_fpkmhk <- genecounts_fpkmhk[,-c(1:2)]
+
+
+# remove samples D2 and D9 from batch1 (Older)
+gc_fpkmhk <- gc_fpkmhk[, !(colnames(gc_fpkmhk) %in% 
+                             phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1])]
+
+```
+
+## PCA
+```{r Plot PCA}
+##FPKM adjusted by housekeeping genes
+t.gc_fpkmhk <-  as.data.frame(t(gc_fpkmhk))
+t.gc_fpkmhk$label <- rownames(t.gc_fpkmhk)
+t.gc_fpkmhk <- merge(phenodata, t.gc_fpkmhk, by = 'label')
+
+#PCA
+prcom.t.gc_fpkmhk <- prcomp(t.gc_fpkmhk[,-c(1:3)])
+
+autoplot(prcom.t.gc_fpkmhk, t.gc_fpkmhk, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15)  +
+  ggtitle("FPKM adjusted by Housekeeping genes")
+
+### UPC
+# Transpose and add Sample and Group from phenodata
+t.gc_upc <-  as.data.frame(t(gc_upc))
+t.gc_upc$label <- rownames(t.gc_upc)
+t.gc_upc <- merge(phenodata, t.gc_upc, by = 'label')
+
+#PCA
+prcom.t.gc_upc <- prcomp(t.gc_upc[,-c(1:4)])
+
+autoplot(prcom.t.gc_upc, t.gc_upc, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15)  +
+  ggtitle("Gene counts - UPC")
+
+
+
+### RAW
+# Transpose and add Sample and Group from phenodata
+t.gc_raw <-  as.data.frame(t(gc_raw))
+t.gc_raw$label <- rownames(t.gc_raw)
+t.gc_raw <- merge(phenodata, t.gc_raw, by = 'label')
+
+#PCA
+prcom.t.gc_raw <- prcomp(t.gc_raw[,-c(1:3)])
+
+autoplot(prcom.t.gc_raw, t.gc_raw, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15)  +
+  ggtitle("Gene counts - RAW")
+
+### FPKM
+# Transpose and add Sample and Group from phenodata
+t.gc_fpkm <-  as.data.frame(t(gc_fpkm))
+t.gc_fpkm$label <- rownames(t.gc_fpkm)
+t.gc_fpkm <- merge(phenodata, t.gc_fpkm, by = 'label')
+
+#PCA
+prcom.t.gc_fpkm <- prcomp(t.gc_fpkm[,-c(1:3)])
+
+autoplot(prcom.t.gc_fpkm, t.gc_fpkm, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15) +
+  ggtitle("Gene counts - FPKM")
+
+### Combat-seq
+# Transpose and add Sample and Group from phenodata
+t.gc_combat <-  as.data.frame(t(gc_combat))
+t.gc_combat$label <- rownames(t.gc_combat)
+t.gc_combat <- merge(phenodata, t.gc_combat, by = 'label', all=F)
+
+t.gc_combat <- t.gc_combat[-77,]
+#PCA
+prcom.t.gc_combat <- prcomp(t.gc_combat[,-c(1:4)])
+
+autoplot(prcom.t.gc_combat, t.gc_combat, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15) +
+  ggtitle("Gene counts - Combat-seq adjusted/TPM")
+
+### scBatch
+# Transpose and add Sample and Group from phenodata
+t.gc_scbatch <-  as.data.frame(t(gc_scbatch))
+t.gc_scbatch$label <- rownames(t.gc_scbatch)
+t.gc_scbatch <- merge(phenodata, t.gc_scbatch, by = 'label')
+
+#PCA
+prcom.t.gc_scbatch <- prcomp(t.gc_scbatch[,-c(1:4)])
+
+autoplot(prcom.t.gc_scbatch, t.gc_scbatch, shape = 'Group', colour= 'Sample', size=3) +
+  scale_color_manual(values= brewer.pal(8,"Set2")) +
+  theme_bw(base_size = 15) +
+  ggtitle("Gene counts - scBatch adjusted")
+```
+
+## Plot housekeeping genes expression
+```{r Plot housekeeping genes expression}
+#House keeping genes dataframe
+hkg_genesymbol <- c("C1orf43","CHMP2A","EMC7","GPI",
+                    "PSMB2","PSMB4","RAB7A","REEP5",
+                    "SNRPD3","VCP","VPS29")
+
+hkg_ensemblid <- c("ENSG00000143612", "ENSG00000130724", "ENSG00000134153", 
+                   "ENSG00000105220","ENSG00000126067", "ENSG00000159377", 
+                   "ENSG00000075785", "ENSG00000129625","ENSG00000100028", 
+                   "ENSG00000165280", "ENSG00000111237")
+
+hkg_df <- data.frame(genesymbol = hkg_genesymbol, ensemblid = hkg_ensemblid)
+
+hkg_upc <- cbind(t.gc_upc[,1:4] , 
+                 t.gc_upc[ , colnames(t.gc_upc) %in% hkg_df$ensemblid])
+hkg_upc <- tidyr::gather(hkg_upc, "Genes", "Counts", 5:ncol(hkg_upc))
+hkg_upc$Group <- relevel(hkg_upc$Group, 'Children')
+hkg_upc <- merge(hkg_upc, hkg_df, by.x='Genes', by.y='ensemblid')
+
+
+hkg_raw <- cbind(t.gc_raw[,1:3] , 
+                 t.gc_raw[ , colnames(t.gc_raw) %in% hkg_df$ensemblid])
+hkg_raw <- tidyr::gather(hkg_raw, "Genes", "Counts", 4:ncol(hkg_raw))
+hkg_raw$Group <- relevel(hkg_raw$Group, 'Children')
+hkg_raw <- merge(hkg_raw, hkg_df, by.x='Genes', by.y='ensemblid')
+
+hkg_fpkm <- cbind(t.gc_fpkm[,1:3] , 
+                  t.gc_fpkm[ , colnames(t.gc_fpkm) %in% hkg_df$ensemblid])
+hkg_fpkm <- tidyr::gather(hkg_fpkm, "Genes", "Counts", 4:ncol(hkg_fpkm))
+hkg_fpkm$Group <- relevel(hkg_fpkm$Group, 'Children')
+hkg_fpkm <- merge(hkg_fpkm, hkg_df, by.x='Genes', by.y='ensemblid')
+
+
+hkg_fpkmhk <- cbind(t.gc_fpkmhk[,1:3] , 
+                  t.gc_fpkmhk[ , colnames(t.gc_fpkmhk) %in% hkg_df$ensemblid])
+hkg_fpkmhk <- tidyr::gather(hkg_fpkmhk, "Genes", "Counts", 4:ncol(hkg_fpkmhk))
+hkg_fpkmhk$Group <- relevel(hkg_fpkmhk$Group, 'Children')
+hkg_fpkmhk <- merge(hkg_fpkmhk, hkg_df, by.x='Genes', by.y='ensemblid')
+hkg_fpkmhk$Counts <- log2(hkg_fpkmhk$Counts)
+
+hkg_combat <- cbind(t.gc_combat[,1:4] , 
+                    t.gc_combat[ , colnames(t.gc_combat) %in% hkg_df$ensemblid])
+hkg_combat <- tidyr::gather(hkg_combat, "Genes", "Counts", 5:ncol(hkg_combat))
+hkg_combat$Group <- relevel(hkg_combat$Group, 'Children')
+hkg_combat <- merge(hkg_combat, hkg_df, by.x='Genes', by.y='ensemblid')
+hkg_combat$Counts <- log2(hkg_combat$Counts + 1)
+
+hkg_scbatch <- cbind(t.gc_scbatch[,1:3] , 
+                     t.gc_scbatch[ , colnames(t.gc_scbatch) %in% hkg_df$ensemblid])
+hkg_scbatch <- tidyr::gather(hkg_scbatch, "Genes", "Counts", 4:ncol(hkg_scbatch))
+hkg_scbatch$Group <- relevel(hkg_scbatch$Group, 'Children')
+hkg_scbatch <- merge(hkg_scbatch, hkg_df, by.x='Genes', by.y='ensemblid')
+
+
+
+my_comparisons <- list( c("Children", "Adults"), c("Children", "Elderly"), 
+                        c("Adults", "Elderly") )
+
+## Violin-plot UPC
+ggviolin(hkg_upc, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'Counts UPC') +
+ stat_compare_means(comparisons = my_comparisons) 
+# scale_y_continuous(limits = c(1, 11))
+
+## Violin-plot Raw
+ggviolin(hkg_raw, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'Raw counts') +
+ stat_compare_means(comparisons = my_comparisons) 
+# scale_y_continuous(limits = c(1, 11))
+
+## Violin-plot FPKM adjusted by Housekeeping genes
+ggviolin(hkg_fpkmhk, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'FPKM adjusted by Housekeeping genes') +
+ stat_compare_means(comparisons = my_comparisons)
+
+
+
+## Violin-plot FPKM
+ggviolin(hkg_fpkm, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'FPKM') +
+ stat_compare_means(comparisons = my_comparisons)
+
+## Violin-plot Combat
+ggviolin(hkg_combat, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'log2 FPKM - Combat-seq adjusted') +
+ stat_compare_means(comparisons = my_comparisons) 
+
+## Violin-plot scBatch
+ggviolin(hkg_scbatch, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'Counts - scBatch adjusted') +
+ stat_compare_means(comparisons = my_comparisons)
+
+```
+
+## Expression analysis selected genes
+```{r Plot selected genes expression}
+#Selected genes dataframe
+#sg_genesymbol <- c("ACE2","TMPRSS2","FURIN","DPP4",
+#                    "ANPEP","RAB1A", "TRIB3", "HAPLN2")
+
+sg_genesymbol <- c("ACE2","TMPRSS2","FURIN","DPP4",
+                  "ANPEP","RAB1A")
+
+#sg_ensemblid <- c("ENSG00000130234", "ENSG00000184012", "ENSG00000140564", 
+#                  "ENSG00000197635","ENSG00000166825", "ENSG00000138069",
+#                  "ENSG00000101255", "ENSG00000132702")
+
+sg_ensemblid <- c("ENSG00000130234","ENSG00000184012", "ENSG00000140564", 
+                  "ENSG00000197635","ENSG00000166825", "ENSG00000138069")
+
+sg_df <- data.frame(genesymbol = sg_genesymbol, ensemblid = sg_ensemblid)
+
+sg_fpkmhk <- cbind(t.gc_fpkmhk[,1:3], 
+                 t.gc_fpkmhk[ , colnames(t.gc_fpkmhk) %in% sg_df$ensemblid])
+sg_fpkmhk <- tidyr::gather(sg_fpkmhk, "Genes", "Counts", 4:ncol(sg_fpkmhk))
+sg_fpkmhk$Group <- relevel(sg_fpkmhk$Group, 'Children')
+sg_fpkmhk <- merge(sg_fpkmhk, sg_df, by.x='Genes', by.y='ensemblid')
+sg_fpkmhk$Counts <- log2(sg_fpkmhk$Counts+1)
+# only samples with curretage
+sg_fpkmhk <- sg_fpkmhk[sg_fpkmhk$Sample %in% c('UK_cur','UK_ICL_cur','ages_batch1'),]
+
+sg_fpkm <- cbind(t.gc_fpkm[,1:3], 
+                 t.gc_fpkm[ , colnames(t.gc_fpkm) %in% sg_df$ensemblid])
+sg_fpkm <- tidyr::gather(sg_fpkm, "Genes", "Counts", 4:ncol(sg_fpkm))
+sg_fpkm$Group <- relevel(sg_fpkm$Group, 'Children')
+sg_fpkm <- merge(sg_fpkm, sg_df, by.x='Genes', by.y='ensemblid')
+sg_fpkm$Counts <- log2(sg_fpkm$Counts)
+
+
+sg_combat <- cbind(t.gc_combat[,1:4], 
+                 t.gc_combat[ , colnames(t.gc_combat) %in% sg_df$ensemblid])
+sg_combat <- tidyr::gather(sg_combat, "Genes", "Counts", 5:ncol(sg_combat))
+sg_combat$Group <- relevel(sg_combat$Group, 'Children')
+sg_combat <- merge(sg_combat, sg_df, by.x='Genes', by.y='ensemblid')
+sg_combat$Counts <- log2(sg_combat$Counts + 1)
+
+
+sg_scbatch <- cbind(t.gc_scbatch[,1:3], 
+                    t.gc_scbatch[ , colnames(t.gc_scbatch) %in% sg_df$ensemblid])
+sg_scbatch <- tidyr::gather(sg_scbatch, "Genes", "Counts", 4:ncol(sg_scbatch))
+sg_scbatch$Group <-relevel(sg_scbatch$Group, 'Children')
+sg_scbatch <- merge(sg_scbatch, sg_df, by.x='Genes', by.y='ensemblid')
+sg_scbatch$Counts <- log2(sg_scbatch$Counts)
+sg_scbatch <- sg_scbatch[sg_scbatch$Sample %in% c('UK_cur','UK_ICL_cur','ages_batch1'),]
+
+
+## Violin-plot FPKM adjueted by Housekeeping genes
+ggviolin(sg_fpkmhk, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'log2 FPKM adjusted by Housekeeping genes') +
+ stat_compare_means(comparisons = my_comparisons, exact=F)
+# scale_y_continuous(limits = c(-2, 13))
+
+## Violin-plot FPKM
+ggviolin(sg_fpkm, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         nrow=2,
+         add='median_iqr',
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'FPKM') +
+ stat_compare_means(comparisons = my_comparisons)
+# scale_y_continuous(limits = c(-2, 13))
+
+
+## Violin-plot COmbat-seq
+ggviolin(sg_combat, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         #nrow=2,
+         add="median_iqr",
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'log2 TPM - Combat-seq adjusted') +
+ stat_compare_means(comparisons = my_comparisons, exact=F)
+
+## Violin-plot scBatch
+ggviolin(sg_scbatch, x='Group',y = 'Counts', 
+         facet.by = 'genesymbol',
+         color='black',
+         legend= '',
+         #nrow=2,
+         add="median_iqr",
+         fill='Group',
+         add.params = list(fill = "white"),
+         ylab = 'Expression - scBatch adjusted') +
+ stat_compare_means(comparisons = my_comparisons)
+
+```
+
+
+

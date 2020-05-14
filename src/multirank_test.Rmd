@@ -1,0 +1,38 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r Load libraries}
+if(!require(here, quietly = F)) install.packages("here") 
+if(!require(devtools)) install.packages("devtools")
+if(!require(bayseq)) BiocManager::install("baySeq")
+if(!require(MultiRankSeq)) install_github("slzhao/MultiRankSeq")
+```
+
+```{r}
+counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly.txt"))
+
+phenodata <- read.delim(here("data", "sample_information.txt"))
+
+```
+
+```{r}
+#Subset baseline AND curettage samples
+phenodata <- phenodata[phenodata$timepoint == "baseline" & 
+                         phenodata$sampling.method == "curettage",]
+
+#Subset Older and Children
+phenodata <- phenodata[phenodata$Group %in% c("Children","Older"),]
+
+rownames(counts) <- counts$ID
+counts <- subset(counts, select = as.vector(phenodata$label))
+
+group <- ifelse(phenodata$Group == "Children" ,0 ,1)
+
+result1 <- MultiRankSeqReport(output="MultiRankSeqReport1.html", 
+                            rawCounts=counts, group=group)
+
+  ```
+

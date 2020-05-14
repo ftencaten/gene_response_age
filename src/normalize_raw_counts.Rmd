@@ -1,0 +1,139 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r Load libraries, message = FALSE}
+if (!require("here", quietly = TRUE)) install.packages("here")
+#if (!require("ggpubr", quietly = TRUE)) install.packages("ggpubr")
+#if (!require("ggfortify", quietly = TRUE)) install.packages("ggfortify")
+#if (!require("RColorBrewer", quietly = TRUE)) install.packages("RColorBrewer")
+if (!require("scater", quietly = TRUE)) BiocManager::install("scater")
+```
+
+
+```{r Read input files}
+rawcounts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly.txt"))
+
+phenodata <- read.delim(here("data","sample_information.txt"))
+
+gene_length <- read.delim(here("data","GC_lengths.tsv"))
+```
+
+
+```{r Normalize}
+#Subset baseline samples
+phenodata <- phenodata[phenodata$timepoint == "baseline", ]
+
+#Subset baseline samples
+rawcounts <- cbind(rawcounts[, 1:2],
+           rawcounts[, colnames(rawcounts) %in% phenodata$label])
+
+rownames(rawcounts) <- rawcounts$ID
+
+#Add gene length and gc content columns
+rawcounts <- merge(gene_length, rawcounts, by='row.names', all=F)
+
+
+cpm <- calculateCPM(rawcounts[,-c(1:5)])
+tpm <- calculateTPM(rawcounts[,-c(1:5)], lengths =  rawcounts$Length)
+fpkm <- calculateFPKM(rawcounts[,-c(1:5)], lengths =  rawcounts$Length)
+
+keepcpm <- rowSums(cpm > 1) > 351/2
+keeptpm <- rowSums(tpm > 1) > 351/2
+keepfpkm <- rowSums(fpkm > 1) > 351/2
+
+keep <- keepcpm & keeptpm & keepfpkm
+
+cpm <- cpm[keep,]
+tpm <- tpm[keep,]
+fpkm <- fpkm[keep,]
+
+####CPM
+cpm_children_curretage <- apply(cpm[,colnames(cpm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_cur',1 ]], 1, median)
+cpm_children_nasal_fluid <- apply(cpm[,colnames(cpm) %in% 
+                                    phenodata[phenodata$Sample %in% c('UK_swab','Gambia18'),1 ]], 1, median)
+
+
+cpm_adults_curretage <- apply(cpm[,colnames(cpm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_ICL_cur',1 ]], 1, median)
+cpm_adults_nasal_fluid <- apply(cpm[,colnames(cpm) %in% 
+                                      phenodata[phenodata$Sample %in% c('UK_ICL_sam',"Laiv1","Laiv2"),1 ]], 1, median)
+
+cpm_elderly_curretage <- apply(cpm[,colnames(cpm) %in% 
+                                      phenodata[phenodata$Sample == 'ages_batch1',1 ]], 1, median)
+
+####FPKM
+fpkm_children_curretage <- apply(fpkm[,colnames(fpkm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_cur',1 ]], 1, median)
+fpkm_children_nasal_fluid <- apply(fpkm[,colnames(fpkm) %in% 
+                                    phenodata[phenodata$Sample %in% c('UK_swab','Gambia18'),1 ]], 1, median)
+
+
+fpkm_adults_curretage <- apply(fpkm[,colnames(fpkm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_ICL_cur',1 ]], 1, median)
+fpkm_adults_nasal_fluid <- apply(fpkm[,colnames(fpkm) %in% 
+                                      phenodata[phenodata$Sample %in% c('UK_ICL_sam',"Laiv1","Laiv2"),1 ]], 1, median)
+
+fpkm_elderly_curretage <- apply(fpkm[,colnames(fpkm) %in% 
+                                      phenodata[phenodata$Sample == 'ages_batch1',1 ]], 1, median)
+
+####TPM
+tpm_children_curretage <- apply(tpm[,colnames(tpm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_cur',1 ]], 1, median)
+tpm_children_nasal_fluid <- apply(tpm[,colnames(tpm) %in% 
+                                    phenodata[phenodata$Sample %in% c('UK_swab','Gambia18'),1 ]], 1, median)
+
+
+tpm_adults_curretage <- apply(tpm[,colnames(tpm) %in% 
+                                      phenodata[phenodata$Sample == 'UK_ICL_cur',1 ]], 1, median)
+tpm_adults_nasal_fluid <- apply(tpm[,colnames(tpm) %in% 
+                                      phenodata[phenodata$Sample %in% c('UK_ICL_sam',"Laiv1","Laiv2"),1 ]], 1, median)
+
+tpm_elderly_curretage <- apply(tpm[,colnames(tpm) %in% 
+                                      phenodata[phenodata$Sample == 'ages_batch1',1 ]], 1, median)
+
+
+norm.counts <- cbind(rawcounts[,4:5], cpm_children_curretage, cpm_children_nasal_fluid, cpm_adults_curretage, cpm_adults_nasal_fluid,cpm_elderly_curretage, tpm_children_curretage, tpm_children_nasal_fluid, tpm_adults_curretage, tpm_adults_nasal_fluid, tpm_elderly_curretage, fpkm_children_curretage, fpkm_children_nasal_fluid, fpkm_adults_curretage, fpkm_adults_nasal_fluid, fpkm_elderly_curretage)
+
+colnames(norm.counts) <- c("ensemblID", "genesymbol", 
+                           "CPM.children.curettage", "CPM.children.nasal.fluid", 
+                           "CPM.adults.curettage", "CPM.adults.nasal.fluid", "CPM.elderly.curettage",
+                           "TPM.children.curettage", "TPM.children.nasal.fluid", 
+                           "TPM.adults.curettage", "TPM.adults.nasal.fluid", "TPM.elderly.curettage",
+                           "FPKM.children.curettage", "FPKM.children.nasal.fluid", 
+                           "FPKM.adults.curettage", "FPKM.adults.nasal.fluid", "FPKM.elderly.curettage")
+
+write.table(norm.counts, here("results",'norm_counts_CPM_TPM_FPKM_by_group_by_sampling_method.txt'), 
+            sep='\t',quote=F, row.names=F)
+
+
+phenodata[phenodata$Sample == "UK_swab",5] <- 'nasal.fluid'
+phenodata[phenodata$Sample == "UK_cur",5] <- 'curettage'
+phenodata[phenodata$Sample == "Gambia18",5] <- 'nasal.fluid'
+phenodata[phenodata$Sample == "UK_ICL_cur",5] <- 'curettage'
+phenodata[phenodata$Sample == "UK_ICL_sam",5] <- 'nasal.fluid'
+phenodata[phenodata$Sample == "Laiv1",5] <- 'nasal.fluid'
+phenodata[phenodata$Sample == "Laiv2",5] <- 'nasal.fluid'
+phenodata[phenodata$Sample == "ages_batch1",5] <- 'curettage'
+
+colnames(phenodata) <- c('label', 'Sample', 'Group','timepoint','sampling.method')
+
+write.table(phenodata, here("data","phenodata.txt"),sep='\t',quote=F,row.names=F)
+
+cpmout <- cbind(rawcounts[keep,4:5], cpm)
+tpmout <- cbind(rawcounts[keep,4:5], tpm)
+fpkmout <- cbind(rawcounts[keep,4:5], fpkm)
+
+write.table(cpmout, here("results","CPM_merged_datasets_children_adults_elderly.txt"), 
+            sep='\t',quote=F, row.names = F)
+
+write.table(tpmout, here("results","TPM_merged_datasets_children_adults_elderly.txt"), 
+            sep='\t',quote=F, row.names = F)
+
+write.table(fpkmout, here("results","FPKM_merged_datasets_children_adults_elderly.txt"), 
+            sep='\t',quote=F, row.names = F)
+```
+
+

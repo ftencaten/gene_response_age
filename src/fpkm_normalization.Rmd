@@ -1,0 +1,46 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+source('load_libraries.R')
+```
+
+**Read merged dataset**
+```{r}
+rawcounts <- read.delim(here('data','gene_counts_merged_datasets_adults_children.txt'))
+
+gene_length <- read.delim(here('data', "GC_lengths.tsv"))
+
+phenodata_batch1 <- read.delim(here('data', 'phenodata_batch1.tsv'))
+```
+
+```{r}
+# remove samples D2 and D9 from batch1 (Older)
+rawcounts <- rawcounts[, !(colnames(rawcounts) %in% phenodata_batch1[phenodata_batch1$timepoint != 'baseline',1])]
+
+ensembl_list <- rawcounts$ID
+
+gene_length$ID <- rownames(gene_length)
+
+x  <- merge(gene_length, rawcounts, by='ID', all=F)
+
+normcounts <- as.data.frame(calculateFPKM(x[,-c(1:4)],x$Length))
+
+out <- cbind(x[,c(1,4)], normcounts)
+
+#Filter normalized gene counts 
+#Keep genes with cpm >= cpm.threshold at least in percentage_samples
+percentage_samples = 0.5
+fpkm.threshold = 1
+keep = rowSums(out[,-c(1:2)] > fpkm.threshold) > dim(out[,-c(1:2)])[2]*percentage_samples 
+
+out = out[keep,]
+
+write.table(out, here('results', 'FPKM_merged_datasets_children_adults_older.txt'),
+            sep='\t',quote=F,row.names = F)
+
+```
+

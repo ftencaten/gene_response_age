@@ -1,0 +1,233 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r Load libraries, message=F}
+if(!require(here, quietly = F)) install.packages("here") 
+if(!require(tidyverse, quietly = F)) install.packages("tidyverse")
+if(!require(edgeR, quietly = T)) BiocManager::install("edgeR")
+if(!require(RUVSeq, quietly = T)) BiocManager::install("RUVSeq")
+if(!require(RColorBrewer, quietly = T)) install.packages("RColorBrewer")
+if(!require(pheatmap, quietly = T)) install.packages("pheatmap")
+if(!require(mdp, quietly = T)) BiocManager::install("mdp")
+```
+
+```{r}
+#Raw counts file
+counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly.txt"))
+
+phenodata <- read.delim(here("data", "sample_information.txt"))
+
+
+fpkmhouse <- read.delim(here("data","FPKM_merged_datasets_children_adults_older_normalized_by_housekeeping.tsv"))
+fpkm <- read.delim(here("results","FPKM_merged_datasets_children_adults_elderly.txt"))
+cpm <- read.delim(here("results","CPM_merged_datasets_children_adults_elderly.txt"))
+tpm <- read.delim(here("results", "TPM_merged_datasets_children_adults_elderly.txt"))
+```
+
+```{r}
+colors <- brewer.pal(3, "Set2")
+
+phenodata <- phenodata[phenodata$timepoint == "baseline" & 
+                       phenodata$sampling.method == "curettage",]
+
+phenodata$Group <- factor(phenodata$Group, c("Children","Adults","Older"))
+
+hgnc <- counts[,1:2]
+
+rownames(counts) <- counts$ID
+
+counts <- subset(counts, select = as.vector(phenodata$label))
+keep <- rowSums(counts > 5) > ncol(counts)*0.3
+subcounts <- counts[keep,]
+
+#MDP analysis
+
+mdp.results <- mdp(data = as.data.frame(cpm(subcounts)), 
+                   pdata = data.frame(Sample = phenodata$label, Class = phenodata$Group),
+                   control_lab = "Children")
+
+samplescore <- mdp.results$sample_scores$allgenes
+ 
+samples2drop <- subset(samplescore, 
+                       Score > min(samplescore[samplescore$Class == "Older",2]) & 
+                         Class != "Older")
+
+phenodata <- subset(phenodata, !(label %in% as.vector(samples2drop$Sample)))
+subcounts <- subset(subcounts, select = as.vector(phenodata$label))
+
+## Raw counts
+set <- newSeqExpressionSet(as.matrix(subcounts),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(subcounts)))
+
+plotRLE(set, outline=FALSE, col=colors[phenodata$Group],ylim=c(-4, 4), 
+        main = "Raw counts", ylab= "Relative Log Expression")
+plotPCA(set, col=colors[phenodata$Group], cex=1.2, main = "Raw counts")
+
+selectedGenes <- names(sort(apply(set@assayData[["normalizedCounts"]], 1, var), 
+                            decreasing = T)[1:1000])
+pheatmap(set@assayData[["normalizedCounts"]][selectedGenes,], 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+#TMM
+settmm <- newSeqExpressionSet(as.matrix(tmm),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(tmm)))
+
+plotRLE(settmm, outline=FALSE, col=colors[phenodata$Group], ylim=c(-4, 4), 
+        main = "TMM", ylab= "Relative Log Expression")
+
+plotPCA(settmm, col=colors[phenodata$Group], cex=1.2)
+
+selectedGenes <- names(sort(apply(counts(settmm), 1, var), decreasing = T)[1:100])
+pheatmap(counts(settmm[selectedGenes,]), 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+
+## FPKM adjusted ith housekeeping gene expression
+rownames(fpkmhouse) <- fpkm$Symbol
+fpkmhouse = subset(fpkmhouse, select = as.vector(phenodata$label))
+
+setfpkmhouse <- newSeqExpressionSet(as.matrix(fpkmhouse),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(fpkmhouse)))
+
+plotRLE(setfpkmhouse, outline=FALSE, col=colors[phenodata$Group], ylim=c(-4, 4), 
+        main = "FPKM Housekeeping", ylab= "Relative Log Expression")
+
+plotPCA(setfpkmhouse, col=colors[phenodata$Group], cex=1.2)
+
+selectedGenes <- names(sort(apply(counts(setfpkmhouse), 1, var), decreasing = T)[300:400])
+pheatmap(counts(setfpkmhouse[selectedGenes,]), 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+
+## FPKM
+rownames(fpkm) <- fpkm$ID
+fpkm = subset(fpkm, select = as.vector(phenodata$label))
+
+setfpkm <- newSeqExpressionSet(as.matrix(fpkm),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(fpkm)))
+
+plotRLE(setfpkm, outline=FALSE, col=colors[phenodata$Group], ylim=c(-4, 4), 
+        main = "FPKM", ylab= "Relative Log Expression")
+
+plotPCA(setfpkm, col=colors[phenodata$Group], cex=1.2)
+
+selectedGenes <- names(sort(apply(counts(setfpkm), 1, var), decreasing = T)[1:100])
+pheatmap(counts(setfpkm[selectedGenes,]), 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+## CPM
+rownames(cpm) <- cpm$ID
+cpm = subset(cpm, select = as.vector(phenodata$label))
+
+setcpm<- newSeqExpressionSet(as.matrix(cpm),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(cpm)))
+
+plotRLE(setcpm, outline=FALSE, col=colors[phenodata$Group], ylim=c(-4, 4), 
+        main="CPM",  ylab= "Relative Log Expression")
+
+plotPCA(setcpm, col=colors[phenodata$Group], cex=1.2)
+
+## TPM
+rownames(tpm) <- tpm$ID
+tpm = subset(tpm, select = as.vector(phenodata$label))
+
+settpm <- newSeqExpressionSet(as.matrix(tpm),
+                           phenoData = data.frame(phenodata$Group,
+                                                  row.names=colnames(tpm)))
+
+plotRLE(settpm, outline=FALSE, col=colors[phenodata$Group], ylim=c(-4, 4), 
+        main="TPM", ylab= "Relative Log Expression")
+
+plotPCA(settpm, col=colors[phenodata$Group], cex=1.2, main = "TPM")
+
+selectedGenes <- names(sort(apply(counts(settpm), 1, var), decreasing = T)[1:100])
+pheatmap(counts(settpm[selectedGenes,]), 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+#RUVg
+# Selected negative control genes
+gene <- c("ENSG00000100395","ENSG00000120314",'ENSG00000244045','ENSG00000125826')
+
+set1 <- RUVg(set, gene, k=1)
+
+plotRLE(set1, outline=FALSE, col=colors[phenodata$Group],
+        main = "RUVg negative-control genes", ylim = c(-4,4))
+
+plotPCA(set1, col=colors[phenodata$Group], cex=1.2, main = "RUVg negative-control genes")
+
+selectedGenes <- names(sort(apply(counts(set1), 1, var), decreasing = T)[1:100])
+pheatmap(counts(set1[selectedGenes,]), 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+#RUVg empirical genes
+
+design <- model.matrix(~phenodata.Group, data=pData(set))
+y <- DGEList(counts=counts(set), group=phenodata$Group)
+y <- calcNormFactors(y, method="upperquartile")
+y <- estimateGLMCommonDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y, design)
+lrt <- glmLRT(fit, coef=2:3)
+top <- topTags(lrt, n=nrow(set))$table
+
+empirical <- rownames(set)[which(!(rownames(set) %in% rownames(top)[1:5000]))]
+
+set <- betweenLaneNormalization(set, which="upper")
+
+set2 <- RUVg(set, empirical, k=1)
+
+plotRLE(set2, outline=FALSE, col=colors[phenodata$Group], 
+        main= "RUVg empirical stable genes", ylab='Relative Log Expression', ylim=c(-4, 4))
+
+plotPCA(set2, col=colors[phenodata$Group], cex=1.2)
+
+selectedGenes <- names(sort(apply(set2@assayData[["normalizedCounts"]], 1, var), 
+                            decreasing = T)[1:1000])
+pheatmap(set2@assayData[["normalizedCounts"]][selectedGenes,], 
+             scale = 'row',
+             cutree_cols = 3, 
+             show_rownames = FALSE)
+
+```
+
+
+Analisando as amostras de rna-seq de crianças, adultos e idosos coletadas com o método de curetagem percebi que algumas amostras de adultos pareciam distintas das demais. Ao rodar o MDP ficou claro que 9 amostras de adultos apresentavam sample score maior que os valores de idosos Removi essas 9 amostras.
+
+Fazendo os plots de RLE e PCA com as contagens brutas é possível perceber que existe uma grande variação entre as amostras. Ao fazer a normalização com CPM essa variação já diminui bastante, mas ainda existe uma grande variação no PCA. Rodei a análise do RUVseq usando os genes sem variação entre os três grupos como controle negativo, primeiramente com os dados brutos e depois com os dados normalizados com cpm. A normalização e k =1 produz um resultado satisfatorio, com pouca variação no RLE e divisão aceitavel das amostras no PCA.
+
+O que fica melhor nas análises, as 105 amostras de curetagem restantes normalizadas de forma corriqueira ou os dados oriundos da análise do RUVseq? Preciso testar.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
