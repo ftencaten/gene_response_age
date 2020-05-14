@@ -8,10 +8,12 @@ if(!require(here, quietly = F)) {
   install.packages("here") 
   library(here)
 }
+
 if(!require(tidyverse, quietly = F)) {
   install.packages("tidyverse")
   library(tidyverse)
 }
+
 if(!require(edgeR, quietly = T)) {BiocManager::install("edgeR")}
 if(!require(RUVSeq, quietly = T)) BiocManager::install("RUVSeq")
 if(!require(mdp, quietly = T)) BiocManager::install("mdp")
