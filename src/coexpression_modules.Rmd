@@ -1,0 +1,60 @@
+---
+title: "R Notebook"
+---
+
+```{r Load libraries, message = F}
+if(!require(here, quietly = F)) {
+  install.packages("here")
+  library(here)
+}
+
+if(!require(CEMiTool, quietly = F)) {
+  BiocManager::install("CEMiTool")
+  library(CEMiTool)
+}
+```
+
+```{r Load input files}
+tmm.counts <- read.delim(here("data","tmm_counts_curettage.tsv"))
+
+phenodata <- read.delim(here("data","phenodata_curettage.tsv"))
+
+tmp <- read.delim("/home/ftencaten/Downloads/cemitool-expression.tsv")
+```
+
+```{r}
+rownames(tmm.counts) <- tmm.counts$ID
+
+#Filter low expression genes
+keep <- rowSums(tmm.counts[,-c(1:2)] > 1) > ncol(tmm.counts[,-c(1:2)])*0.5
+tmm.counts <- tmm.counts[keep,]
+
+#Prepare sample annotation
+#smpl.annot <- data.frame(SampleName = phenodata$label, 
+#                    Class = interaction(phenodata$Group, phenodata$sex))
+smpl.annot <- data.frame(SampleName = phenodata$label, Class = phenodata$Group)
+
+tmm.counts.children <- subset(tmm.counts, 
+                              select = as.vector(smpl.annot[smpl.annot$Class=="Children",1]))
+tmm.counts.adults <- subset(tmm.counts, 
+                              select = as.vector(smpl.annot[smpl.annot$Class=="Adults",1]))
+tmm.counts.elderly <- subset(tmm.counts, 
+                              select = as.vector(smpl.annot[smpl.annot$Class=="Older",1]))
+
+tmm.counts.elderly.children <- subset(tmm.counts, 
+                              select = as.vector(smpl.annot[smpl.annot$Class=="Children" | smpl.annot$Class=="Older",1]))
+#Run CEMITool
+cem.tmm.children <- cemitool(tmm.counts.children, smpl.annot[smpl.annot$Class=="Children",])
+diagnostic_report(cem.tmm.children, directory = "./Reports/Diagnostics_children")
+
+cem.tmm.adults <- cemitool(tmm.counts.adults, smpl.annot[smpl.annot$Class=="Adults",])
+diagnostic_report(cem.tmm.adults, directory = "./Reports/Diagnostics_adults")
+
+cem.tmm.elderly <- cemitool(tmm.counts.elderly, smpl.annot[smpl.annot$Class=="Elderly",])
+diagnostic_report(cem.tmm.elderly, directory = "./Reports/Diagnostics_elderly")
+
+cem.tmm.elderly.children <- cemitool(tmm.counts.elderly.children, smpl.annot[smpl.annot$Class=="Children"|smpl.annot$Class=="Elderly",])
+diagnostic_report(cem.tmm.elderly.children, directory = "./Reports/Diagnostics_elderly_children")
+
+```
+
