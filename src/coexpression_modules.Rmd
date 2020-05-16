@@ -44,17 +44,39 @@ tmm.counts.elderly <- subset(tmm.counts,
 tmm.counts.elderly.children <- subset(tmm.counts, 
                               select = as.vector(smpl.annot[smpl.annot$Class=="Children" | smpl.annot$Class=="Older",1]))
 #Run CEMITool
-cem.tmm.children <- cemitool(tmm.counts.children, smpl.annot[smpl.annot$Class=="Children",])
+cem.tmm.children <- cemitool(tmm.counts.children, 
+                             smpl.annot[smpl.annot$Class=="Children",],
+                             apply_vst = TRUE)
 diagnostic_report(cem.tmm.children, directory = "./Reports/Diagnostics_children")
 
 cem.tmm.adults <- cemitool(tmm.counts.adults, smpl.annot[smpl.annot$Class=="Adults",])
 diagnostic_report(cem.tmm.adults, directory = "./Reports/Diagnostics_adults")
 
-cem.tmm.elderly <- cemitool(tmm.counts.elderly, smpl.annot[smpl.annot$Class=="Elderly",])
-diagnostic_report(cem.tmm.elderly, directory = "./Reports/Diagnostics_elderly")
+cem.tmm.elderly <- cemitool(tmm.counts.elderly,
+                            smpl.annot[smpl.annot$Class=="Elderly",],
+                            apply_vst = TRUE)
+diagnostic_report(cem.tmm.elderly, directory = "./Reports/Diagnostics_elderly_apply_vst")
 
 cem.tmm.elderly.children <- cemitool(tmm.counts.elderly.children, smpl.annot[smpl.annot$Class=="Children"|smpl.annot$Class=="Elderly",])
 diagnostic_report(cem.tmm.elderly.children, directory = "./Reports/Diagnostics_elderly_children")
+
+
+##ALL
+cem.tmm <- cemitool(tmm.counts[,-c(1:2)], smpl.annot, apply_vst = TRUE)
+diagnostic_report(cem.tmm, directory = "./Reports/Diagnostics_ALL_apply_vst", 
+                  title = "Diagnostics All samples, apply_vst = TRUE")
+```
+
+```{r Module inspection and report}
+nmodules(cem.tmm.adults)
+
+get_cemitool_r2_beta(cem.tmm)
+
+dim(module_genes(cem.tmm.adults))
+
+cem.tmm.adults <- mod_gsea(cem.tmm.adults)
+cem.tmm.adults <- plot_gsea(cem.tmm.adults)
+show_plot(cem.tmm.adults, "gsea")
 
 ```
 
