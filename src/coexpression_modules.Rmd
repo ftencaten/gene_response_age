@@ -7,10 +7,13 @@ if(!require(here, quietly = F)) {
   install.packages("here")
   library(here)
 }
-
 if(!require(CEMiTool, quietly = F)) {
   BiocManager::install("CEMiTool")
   library(CEMiTool)
+}
+if(!require(clusterProfiler, quietly = F)) {
+  BiocManager::install("clusterProfiler")
+  library(clusterProfiler)
 }
 ```
 
@@ -19,64 +22,85 @@ tmm.counts <- read.delim(here("data","tmm_counts_curettage.tsv"))
 
 phenodata <- read.delim(here("data","phenodata_curettage.tsv"))
 
-tmp <- read.delim("/home/ftencaten/Downloads/cemitool-expression.tsv")
+my_gmt <- read.gmt(gmtfile = here("data", "ReactomePathwaysLevel3.gmt"))
+
+ensembl2hgnc <- read.delim(here("data","ensemblID_to_HGNCsymbol.txt"))
+#tmp <- read.delim("/home/ftencaten/Downloads/cemitool-expression.tsv")
 ```
 
 ```{r}
+### Add ensemblID to gmt
+my_gmt <- merge(my_gmt,ensembl2hgnc,by.x = "gene",by.y = "HGNC.symbol",all.y = F)
+my_gmt <- my_gmt[,-1]
+colnames(my_gmt) <- c("term","gene")
 rownames(tmm.counts) <- tmm.counts$ID
 
-#Filter low expression genes
-keep <- rowSums(tmm.counts[,-c(1:2)] > 1) > ncol(tmm.counts[,-c(1:2)])*0.5
-tmm.counts <- tmm.counts[keep,]
+### Filter low expression genes
+#keep <- rowSums(tmm.counts[,-c(1:2)] > 1) > ncol(tmm.counts[,-c(1:2)])*0.5
+#tmm.counts <- tmm.counts[keep,]
 
-#Prepare sample annotation
-#smpl.annot <- data.frame(SampleName = phenodata$label, 
-#                    Class = interaction(phenodata$Group, phenodata$sex))
-smpl.annot <- data.frame(SampleName = phenodata$label, Class = phenodata$Group)
+### Sample annotation
+smpl.annot <- data.frame(SampleName = phenodata$label, 
+                    Class = interaction(phenodata$Group, phenodata$sex))
+#smpl.annot <- data.frame(SampleName = phenodata$label, Class = phenodata$Group)
 
-tmm.counts.children <- subset(tmm.counts, 
-                              select = as.vector(smpl.annot[smpl.annot$Class=="Children",1]))
-tmm.counts.adults <- subset(tmm.counts, 
-                              select = as.vector(smpl.annot[smpl.annot$Class=="Adults",1]))
-tmm.counts.elderly <- subset(tmm.counts, 
-                              select = as.vector(smpl.annot[smpl.annot$Class=="Older",1]))
+### Counts by group
 
-tmm.counts.elderly.children <- subset(tmm.counts, 
-                              select = as.vector(smpl.annot[smpl.annot$Class=="Children" | smpl.annot$Class=="Older",1]))
-#Run CEMITool
-cem.tmm.children <- cemitool(tmm.counts.children, 
-                             smpl.annot[smpl.annot$Class=="Children",],
-                             apply_vst = TRUE)
-diagnostic_report(cem.tmm.children, directory = "./Reports/Diagnostics_children")
+#tmm.counts.children <- subset(tmm.counts, 
+#                              select = as.vector(smpl.annot[smpl.annot$Class=="Children",1]))
+#tmm.counts.adults <- subset(tmm.counts, 
+#                              select = as.vector(smpl.annot[smpl.annot$Class=="Adults",1]))
+#tmm.counts.elderly <- subset(tmm.counts, 
+#                              select = as.vector(smpl.annot[smpl.annot$Class=="Older",1]))
+#tmm.counts.elderly.children <- subset(tmm.counts, 
+#                              select = as.vector(smpl.annot[smpl.annot$Class=="Children" | smpl.annot$Class=="Older",1]))
 
-cem.tmm.adults <- cemitool(tmm.counts.adults, smpl.annot[smpl.annot$Class=="Adults",])
-diagnostic_report(cem.tmm.adults, directory = "./Reports/Diagnostics_adults")
+### Run CEMITool by group
 
-cem.tmm.elderly <- cemitool(tmm.counts.elderly,
-                            smpl.annot[smpl.annot$Class=="Elderly",],
-                            apply_vst = TRUE)
-diagnostic_report(cem.tmm.elderly, directory = "./Reports/Diagnostics_elderly_apply_vst")
+#cem.tmm.children <- cemitool(tmm.counts.children, 
+#                             smpl.annot[smpl.annot$Class=="Children",],
+#                             apply_vst = TRUE)
+#diagnostic_report(cem.tmm.children, directory = "./Reports/Diagnostics_children")
 
-cem.tmm.elderly.children <- cemitool(tmm.counts.elderly.children, smpl.annot[smpl.annot$Class=="Children"|smpl.annot$Class=="Elderly",])
-diagnostic_report(cem.tmm.elderly.children, directory = "./Reports/Diagnostics_elderly_children")
+#cem.tmm.adults <- cemitool(tmm.counts.adults, smpl.annot[smpl.annot$Class=="Adults",])
+#diagnostic_report(cem.tmm.adults, directory = "./Reports/Diagnostics_adults")
+
+#cem.tmm.elderly <- cemitool(tmm.counts.elderly,
+#                            smpl.annot[smpl.annot$Class=="Elderly",],
+#                            apply_vst = TRUE)
+#diagnostic_report(cem.tmm.elderly, directory = "./Reports/Diagnostics_elderly_apply_vst")
+
+#cem.tmm.elderly.children <- cemitool(tmm.counts.elderly.children, smpl.annot[smpl.annot$Class=="Children"|smpl.annot$Class=="Elderly",])
+#diagnostic_report(cem.tmm.elderly.children, directory = "./Reports/Diagnostics_elderly_children")
 
 
-##ALL
+## Run CEMITool all samples together
 cem.tmm <- cemitool(tmm.counts[,-c(1:2)], smpl.annot, apply_vst = TRUE)
-diagnostic_report(cem.tmm, directory = "./Reports/Diagnostics_ALL_apply_vst", 
+diagnostic_report(cem.tmm, directory = "./Reports/Diagnostics_ALL_apply_vst_MF", 
                   title = "Diagnostics All samples, apply_vst = TRUE")
 ```
 
 ```{r Module inspection and report}
-nmodules(cem.tmm.adults)
+nmodules(cem.tmm)
 
 get_cemitool_r2_beta(cem.tmm)
 
-dim(module_genes(cem.tmm.adults))
+module.genes <- module_genes(cem.tmm)
 
-cem.tmm.adults <- mod_gsea(cem.tmm.adults)
-cem.tmm.adults <- plot_gsea(cem.tmm.adults)
-show_plot(cem.tmm.adults, "gsea")
+#Module enrichment
+cem.tmm <- mod_gsea(cem.tmm)
+cem.tmm <- plot_gsea(cem.tmm)
+show_plot(cem.tmm, "gsea")
+
+# Expression patterns
+cem.tmm <- plot_profile(cem.tmm)
+plots <- show_plot(cem.tmm, "profile")
+
+# ORA analysis
+cem.tmm <- mod_ora(cem.tmm, my_gmt)
+cem.tmm <- plot_ora(cem.tmm)
+plots <- show_plot(cem.tmm, "ora")
+plots[2]
 
 ```
 
