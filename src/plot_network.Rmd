@@ -1,0 +1,68 @@
+---
+title: "R Notebook"
+---
+Modified version of "r_markdown_notebook.Rmd". 
+The original file can be acessed at:
+/usr/lib/rstudio/resources/templates/r_markdown_notebook_old.Rmd
+
+```{r Load libraries, message = F}
+if(!require(here, quietly = F)) {
+  install.packages("here")
+  library(here)
+}
+if(!require(igraph, quietly = F)) {
+  install.packages("igraph")
+  library(igraph)
+}
+if(!require(tidygraph, quietly = F)) {
+  install.packages("tidygraph")
+  library(tidygraph)
+}
+
+```
+
+```{r Load input files}
+data <- read_graph(here("results","M2_network.graphml"), format = "graphml")
+
+n <- data %>% 
+  igraph::neighborhood(nodes = "PTP4A1", order = 4) 
+ 
+tbl.data <- induced_subgraph(data, vids = unlist(n)) %>%
+  as_tbl_graph(directed = F) %>%  # make undirected
+  activate(nodes) %>% 
+  mutate(centrality = centrality_betweenness()) %>% 
+  arrange(desc(centrality)) %>% 
+  mutate(community = as.factor(group_fast_greedy()))
+
+centrality_threshold <- as_tibble(tbl.data)$centrality[10]
+
+ggraph(tbl.data, "nicely") +
+#  geom_edge_link(edge_alpha = 0.01) +
+  geom_node_point(aes(size = centrality, colour = "blue", alpha = centrality)) +
+  geom_node_text(aes(label = ifelse(centrality >= centrality_threshold, 
+                                    name, NA)), repel = T) +
+  theme_graph()
+
+```
+
+```{r}
+g2 <- net %>% 
+  select(user, friend) %>%  # drop the count column
+  as_tbl_graph(directed = F) %>%  # make undirected
+  activate(edges) %>%
+  filter(!edge_is_multiple()) %>% 
+  activate(nodes) %>% 
+  mutate(centrality = centrality_betweenness()) %>% 
+  arrange(desc(centrality)) %>% 
+  mutate(community = as.factor(group_fast_greedy()))
+
+centrality_threshold <- as_tibble(g2)$centrality[10]
+
+ggraph(g2, "pmds",pivots=100) +
+#  geom_edge_link(edge_alpha = 0.01) +
+  geom_node_point(aes(colour = community,size = centrality, alpha = centrality)) +
+  geom_node_text(aes(label = ifelse(centrality >= centrality_threshold, 
+                                    name, NA)), repel = T) +
+  theme_graph()
+```
+
