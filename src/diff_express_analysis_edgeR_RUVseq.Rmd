@@ -1,6 +1,5 @@
 ---
 title: "R Notebook"
-output: html_notebook
 ---
 
 ```{r Load libraries, message=F}
@@ -8,20 +7,28 @@ if(!require(here, quietly = F)) {
   install.packages("here") 
   library(here)
 }
-
 if(!require(tidyverse, quietly = F)) {
   install.packages("tidyverse")
   library(tidyverse)
 }
-
-if(!require(edgeR, quietly = T)) {BiocManager::install("edgeR")}
-if(!require(RUVSeq, quietly = T)) BiocManager::install("RUVSeq")
-if(!require(mdp, quietly = T)) BiocManager::install("mdp")
+if(!require(edgeR, quietly = T)) {
+  BiocManager::install("edgeR")
+  library(edgeR)
+}
+if(!require(RUVSeq, quietly = T)) {
+  BiocManager::install("RUVSeq")
+  library(RUVseq)
+}
+if(!require(mdp, quietly = T)) {
+  BiocManager::install("mdp")
+  library(mdp) 
+}
 ```
 
 ```{r}
 #Raw counts file
-counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly.txt"))
+counts <- read.delim(here("data",
+                          "gene_counts_merged_datasets_children_adults_elderly.txt"))
 
 #Raw counts corrected with Combat-seq
 #counts <- read.delim(here("results","gene_counts_batch-effect_correction_Adults-Children_UK_Gambia_UK-ICL_AgesBatch1_Combat-seq_with_nameofG.txt"))
@@ -30,15 +37,19 @@ counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_el
 #counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly_curettage_Combat-seq.tsv"))
 
 phenodata <- read.delim(here("data", "sample_information.txt"))
+
 phenodata_curettage <- read.delim(here("data","phenodata_curettage.tsv"))
+
 tmm <- read.delim(here("data", "tmm_counts_curettage.tsv"))
-tpm <- read.delim(here("results", "TPM_merged_datasets_children_adults_elderly.txt"))
+
+tpm <- read.delim(here("results", 
+                       "TPM_merged_datasets_children_adults_elderly.txt"))
 
 degs <- read.delim(here("data","diff_expression_byAge_bySex_curettage.tsv"))
 ```
 
 
-```{r Subset}
+```{r Subset with MDP}
 phenodata <- phenodata[phenodata$timepoint == "baseline" & 
                        phenodata$sampling.method == "curettage",]
 
@@ -54,7 +65,8 @@ keep <- rowSums(subcounts > 5) > ncol(subcounts)*0.3
 subcounts <- subcounts[keep,]
 
 mdp.results <- mdp(data = as.data.frame(cpm(subcounts)), 
-                   pdata = data.frame(Sample = phenodata$label, Class = phenodata$Group),
+                   pdata = data.frame(Sample = phenodata$label, 
+                                      Class = phenodata$Group),
                    control_lab = "Children")
 
 samplescore <- mdp.results$sample_scores$allgenes
@@ -68,14 +80,15 @@ phenodata <- subset(phenodata, !(label %in% as.vector(samples2drop$Sample)))
 counts <- subset(counts, select = as.vector(phenodata$label))
 ```
 
-```{r Diff expression analysis with RUVseq}
+```{r Diff expression analysis with RUVseq + edgeR}
 df <- NULL
 
 for(i in levels(phenodata$Group)) {
   for(j in levels(phenodata$sex)) {
     
     subphenodata <- phenodata[phenodata$Group != i & phenodata$sex == j,]    
-    subphenodata$Group <- factor(subphenodata$Group, as.vector(unique(subphenodata$Group)))
+    subphenodata$Group <- factor(subphenodata$Group, 
+                                 as.vector(unique(subphenodata$Group)))
     
     subcounts <- subset(counts, select = as.vector(subphenodata$label))
     
@@ -98,9 +111,9 @@ for(i in levels(phenodata$Group)) {
     fit <- glmFit(y, design)
     lrt <- glmLRT(fit, coef=2)
     top <- topTags(lrt, n=nrow(ncounts))$table
-    empirical <- rownames(ncounts)[which(!(rownames(ncounts) %in% rownames(top)[1:5000]))]
+    empirical <- rownames(ncounts)[which(!(rownames(ncounts) %in% 
+                                             rownames(top)[1:5000]))]
     ###
-    
     ncounts <- betweenLaneNormalization(ncounts, which="upper")
     
     set1 <- RUVg(ncounts, empirical, k=1)
@@ -118,7 +131,8 @@ for(i in levels(phenodata$Group)) {
     nup <- nrow(degs[degs$logFC > 1 & degs$FDR <0.01,])
     
     filename <- paste0("DEGs_", levels(subphenodata$Group)[1], ".vs.", 
-                       levels(subphenodata$Group)[2], ".sex_",j,"_glmLRT_RUVg_empirical_control.tsv")
+                       levels(subphenodata$Group)[2],
+                       ".sex_",j,"_glmLRT_RUVg_empirical_control.tsv")
     
     write.table(degs, here("results", "diff_express_edgeR" ,filename),
                 sep='\t',quote=F,row.names = F)
@@ -129,12 +143,13 @@ for(i in levels(phenodata$Group)) {
   }
 }
 
-write.table(df, here("results", "diff_express_edgeR" ,"number_DEGS_logFC1_fdr0.01_glmLRT_RUVg_empirical_control.txt"),
+write.table(df, here("results", "diff_express_edgeR",
+                     "number_DEGS_logFC1_fdr0.01_glmLRT_RUVg_empirical_control.txt"),
                 sep='\t',quote=F,row.names = F)
 ``` 
 
 
-```{r Standard Diff expression analysis}
+```{r Standard Diff expression analysis with edgeR}
 design <- model.matrix(~0 + Group:sex, data=phenodata)
     
 y <- DGEList(counts = counts, genes = hgnc,
@@ -148,6 +163,7 @@ y <- estimateGLMCommonDisp(y, design)
 y <- estimateGLMTagwiseDisp(y, design)
 fit <- glmQLFit(y, design, robust=TRUE)
 
+#F
 adults.vs.children.f <- topTags(glmQLFTest(fit, contrast=c(-1,1,0,0,0,0)),
                                 n=NULL)$table
 
@@ -157,6 +173,7 @@ elderly.vs.adults.f <- topTags(glmQLFTest(fit, contrast=c(0,-1,1,0,0,0)),
 elderly.vs.children.f <- topTags(glmQLFTest(fit, contrast=c(-1,0,1,0,0,0)),
                                  n=NULL)$table
 
+#M
 adults.vs.children.m <- topTags(glmQLFTest(fit, contrast=c(0,0,0,-1,1,0)),
                                 n=NULL)$table
 
@@ -166,6 +183,7 @@ elderly.vs.adults.m <- topTags(glmQLFTest(fit, contrast=c(0,0,0,0,-1,1)),
 elderly.vs.children.m <- topTags(glmQLFTest(fit, contrast=c(0,0,0,-1,0,1)),
                                  n=NULL)$table
 
+#M.vs.F
 m.vs.f.children <- topTags(glmQLFTest(fit, contrast=c(-1,0,0,1,0,0)),
                                  n=NULL)$table
 m.vs.f.adults <- topTags(glmQLFTest(fit, contrast=c(0,-1,0,0,1,0)),
@@ -174,22 +192,29 @@ m.vs.f.elderly <- topTags(glmQLFTest(fit, contrast=c(0,0,-1,0,0,1)),
                                  n=NULL)$table
 
 out <- adults.vs.children.f %>%
-  full_join(adults.vs.children.m, by = c("ID","nameofG"), suffix = c(".Adults.vs.Children.F", ".Adults.vs.Children.M")) %>%
+  full_join(adults.vs.children.m, by = c("ID","nameofG"), 
+            suffix = c(".Adults.vs.Children.F", ".Adults.vs.Children.M")) %>%
   full_join(elderly.vs.children.f, by = c("ID","nameofG")) %>%
-  full_join(elderly.vs.children.m, by = c("ID","nameofG"), suffix = c(".Elderly.vs.Children.F", ".Elderly.vs.Children.M")) %>%
+  full_join(elderly.vs.children.m, by = c("ID","nameofG"),
+            suffix = c(".Elderly.vs.Children.F", ".Elderly.vs.Children.M")) %>%
   full_join(elderly.vs.adults.f, by = c("ID","nameofG")) %>%
-  full_join(elderly.vs.adults.m, by = c("ID","nameofG"), suffix = c(".Elderly.vs.Adults.F", ".Elderly.vs.Adults.M")) %>%
+  full_join(elderly.vs.adults.m, by = c("ID","nameofG"),
+            suffix = c(".Elderly.vs.Adults.F", ".Elderly.vs.Adults.M")) %>%
   full_join(m.vs.f.children, by = c("ID","nameofG")) %>%
-  full_join(m.vs.f.adults, by = c("ID","nameofG"), suffix = c(".M.vs.F.Children", ".M.vs.F.Adults")) %>%
-  full_join(dplyr::rename(m.vs.f.elderly, logFC.M.vs.F.Elderly = logFC, logCPM.M.vs.F.Elderly = logCPM, F.M.vs.F.Elderly = F, PValue.M.vs.F.Elderly = PValue, FDR.M.vs.F.Elderly = FDR), by = c("ID","nameofG"))
+  full_join(m.vs.f.adults, by = c("ID","nameofG"), 
+            suffix = c(".M.vs.F.Children", ".M.vs.F.Adults")) %>%
+  full_join(dplyr::rename(m.vs.f.elderly, logFC.M.vs.F.Elderly = logFC,
+                          logCPM.M.vs.F.Elderly = logCPM, F.M.vs.F.Elderly = F,
+                          PValue.M.vs.F.Elderly = PValue, FDR.M.vs.F.Elderly = FDR), 
+            by = c("ID","nameofG"))
 
 
 up.elderly.vs.children.f <- nrow(elderly.vs.children.f[elderly.vs.children.f$logFC > 1 &
-                                                         elderly.vs.children.f$FDR < 0.01,])
+                                                       elderly.vs.children.f$FDR < 0.01,])
 down.elderly.vs.children.f <- nrow(elderly.vs.children.f[elderly.vs.children.f$logFC < -1 &
                                                          elderly.vs.children.f$FDR < 0.01,])
 up.elderly.vs.children.m <- nrow(elderly.vs.children.m[elderly.vs.children.m$logFC > 1 &
-                                                         elderly.vs.children.m$FDR < 0.01,])
+                                                       elderly.vs.children.m$FDR < 0.01,])
 down.elderly.vs.children.m <- nrow(elderly.vs.children.m[elderly.vs.children.m$logFC < -1 &
                                                          elderly.vs.children.m$FDR < 0.01,])
 
@@ -247,7 +272,7 @@ df <- data.frame(Comparison = compar,
 
 #number of diff express genes 
 write.table(df, here("results","diff_express_edgeR",
-                     "number_DEGS_logFC1_fdr0.01_standard_v2"), 
+                     "number_DEGS_logFC1_fdr0.01_standard.tsv"), 
             sep="\t",quote=F,row.names = F)
 
 #write.table(adults.vs.children.f, here("results","diff_express_edgeR",
@@ -284,8 +309,6 @@ write.table(df, here("results","diff_express_edgeR",
 #write.table(phenodata, here("data","phenodata_curettage.tsv"),sep='\t',quote=F,row.names=F)
 
 #write.table(counts, here("data","raw_counts_curettage.tsv"),sep='\t',quote=F,row.names=F)
-
-
 ```
 
 
@@ -359,7 +382,8 @@ x <- tpm %>%
   left_join(hgnc, by= c("ensemblID" = "ID"))
 
 
-genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","DPP4","APOD","L3MBTL2","RBCK1","TMEM199","WDR55")
+genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","DPP4",
+           "APOD","L3MBTL2","RBCK1","TMEM199","WDR55")
 
 x %>%
   filter(nameofG %in% genes) %>%
@@ -381,7 +405,10 @@ tmm <- as.data.frame(cpm(countsdge))
 #tmm$ID <- rownames(tmm)
 #tmm <- merge(hgnc, tmm, by="ID")
 tmm <- as.data.frame(t(tmm))
-#write.table(tmm, here("data", "tmm_counts_curettage"), sep="\t", quote=F, row.names=F)
+
+#write.table(tmm, here("data", "tmm_counts_curettage"), 
+#            sep="\t", quote=F, row.names=F)
+
 tmm$label <- rownames(tmm)
 tmm <- merge(phenodata, tmm, by="label")
 x <- tmm %>% 
@@ -419,18 +446,21 @@ tmm$label <- rownames(tmm)
 
 out <- phenodata %>%
    full_join(tmm, by = "label") %>%
-   pivot_longer(-colnames(df[,c(1:7)]), names_to = "genes", values_to = "values") %>%
+   pivot_longer(-colnames(df[,c(1:7)]), names_to = "genes", 
+                values_to = "values") %>%
    group_by(Group, sex, genes) %>%
    summarise(mean=mean(values)) %>%
-   pivot_wider(id_cols = "genes", names_from = c("Group","sex"), values_from = "mean") %>%
+   pivot_wider(id_cols = "genes", names_from = c("Group","sex"), 
+               values_from = "mean") %>%
    inner_join(degs, by = c("genes" = "ID")) %>%
    select(-starts_with(c("logCPM.", "F."))) %>%
-   rename(ID = genes, TMM_Adults_M = Adults_M, TMM_Adults_F = Adults_F, TMM_Children_F = Children_F,
-          TMM_Children_M = Children_M, TMM_Elderly_M = Older_M, TMM_Elderly_F = Older_F) %>%
+   rename(ID = genes, TMM_Adults_M = Adults_M, TMM_Adults_F = Adults_F, 
+          TMM_Children_F = Children_F, TMM_Children_M = Children_M, 
+          TMM_Elderly_M = Older_M, TMM_Elderly_F = Older_F) %>%
    select(ID, nameofG, everything())
 
-write.table(out, here("data","TMM_diff_expression_byAge_bySex_curettage.tsv"), sep = "\t",
-            quote = F, row.names = F)
+write.table(out, here("data","TMM_expression_byAge_bySex_curettage.tsv"), 
+            sep = "\t", quote = F, row.names = F)
 ```
 
 ```{r}

@@ -1,6 +1,5 @@
 ---
 title: "R Notebook"
-output: html_notebook
 ---
 
 ```{r}
@@ -20,7 +19,7 @@ rawcounts <- read.delim(here("data","gene_counts_merged_datasets_adults_children
 #Ensembl ID -> Entrez ID
 id = read.delim(here('data', "ensembl-ID_to_entrezID_v2.txt"),head=F)
 
-# Blood cooexpression network gold standart from GIANT
+# Blood co-expression network gold standard from GIANT
 gs = read.delim(here('data', 'blood_gold_standart_giant.dat'), head=F)
 
 
