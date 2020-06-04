@@ -1,5 +1,7 @@
 ---
 title: "R Notebook"
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r Load libraries, message=F}
@@ -71,13 +73,31 @@ mdp.results <- mdp(data = as.data.frame(cpm(subcounts)),
 
 samplescore <- mdp.results$sample_scores$allgenes
  
-samples2drop <- subset(samplescore, 
-                       Score > min(samplescore[samplescore$Class == "Older",2]) & 
+samplescore %>% 
+  ggplot(aes(x = Class, y = Score)) +
+  geom_boxplot()
+
+rc <- boxplot.stats(samplescore[samplescore$Class == "Children",2])$out
+ra <- boxplot.stats(samplescore[samplescore$Class == "Adults",2])$out
+ro <- boxplot.stats(samplescore[samplescore$Class == "Older",2])$out
+
+samples2drop.outliers <- subset(samplescore, Score %in% c(rc,ra,ro))
+
+samples2drop.overlap <- subset(samplescore, 
+                               Score > min(samplescore[samplescore$Class == "Older",2]) & 
                          Class != "Older")
+samples2drop <- unique(c(samples2drop.outliers$Sample,
+                         samples2drop.overlap$Sample))
 
 # Remove samples based on MDP analysis
-phenodata <- subset(phenodata, !(label %in% as.vector(samples2drop$Sample)))
+phenodata <- subset(phenodata, !(phenodata$label %in% samples2drop))
 counts <- subset(counts, select = as.vector(phenodata$label))
+
+# Number of samples by sex and age group
+#phenodata %>% 
+#  group_by(Group, sex) %>% 
+#  summarise(n = n())
+
 ```
 
 ```{r Diff expression analysis with RUVseq + edgeR}
@@ -158,7 +178,7 @@ y <- DGEList(counts = counts, genes = hgnc,
 keep <- filterByExpr(y)
 y <- y[keep, , keep.lib.sizes=FALSE]
 
-y <- calcNormFactors(y)
+y <- calcNormFactors(y,method=c("TMM"))
 y <- estimateGLMCommonDisp(y, design)
 y <- estimateGLMTagwiseDisp(y, design)
 fit <- glmQLFit(y, design, robust=TRUE)
@@ -405,7 +425,7 @@ tmm <- as.data.frame(cpm(countsdge))
 #tmm$ID <- rownames(tmm)
 #tmm <- merge(hgnc, tmm, by="ID")
 tmm <- as.data.frame(t(tmm))
-
+#tmm <- as.data.frame(t(tmm[,-c(1:2)]))
 #write.table(tmm, here("data", "tmm_counts_curettage"), 
 #            sep="\t", quote=F, row.names=F)
 
@@ -418,14 +438,14 @@ x <- tmm %>%
 
 #genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","DPP4","CTSB","CTSL","APOD","L3MBTL2","RBCK1","TMEM199","WDR55")
 
-genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","DPP4","CTSB","CTSL")
+genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","CTSB","CTSL")
 
 #negative controles
 #genes <- c("ATP5G3","NDUFB11","UQCRFS1","COL3A1","COL1A1","COL4A5","TFRC","GOT1","NDUFB5","PTPRO","NDUFS3"	,"CRHBP","MYO5C","NDUFB6","GOT2","ATP5A1","ATP5G1","ATP5J","SDHB","SDHD")
 
 x %>%
   filter(nameofG %in% genes) %>%
-  mutate(Group = fct_relevel(Group, "Children","Adults","Older")) %>%
+  mutate(Group = fct_relevel(Group, "Children","Adults","Elderly")) %>%
   mutate(nameofG = fct_relevel(nameofG, genes)) %>%
   ggplot(aes(x = Group, y = values, fill = sex), cex=1.5) +
   geom_boxplot(position= "dodge", outlier.shape=NA) +
@@ -503,5 +523,36 @@ write.table(out3, here("data","RUVSeq_diff_expression_byAge_bySex_curettage.tsv"
             quote = F, row.names = F)
 
 
+```
+
+```{r}
+# TMM counts with y DGEList object from standard diff express analysis
+tmm <- as.data.frame(cpm(y))
+
+tmm <- as.data.frame(t(tmm))
+
+tmm$label <- rownames(tmm)
+tmm <- merge(phenodata, tmm, by="label")
+x <- tmm %>% 
+  pivot_longer(-colnames(tmm[,1:7]), 
+               names_to = "ensemblID", values_to = "values") %>%
+  left_join(hgnc, by= c("ensemblID" = "ID"))
+
+genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","CTSB","CTSL")
+
+x %>%
+  filter(nameofG %in% genes) %>%
+  mutate(Group = fct_relevel(Group, "Children","Adults","Older")) %>%
+  mutate(nameofG = fct_relevel(nameofG, genes)) %>%
+  ggplot(aes(x = Group, y = values, fill = sex), cex=1.5) +
+  geom_boxplot(position= "dodge", outlier.shape=NA) +
+  facet_wrap(vars(nameofG),nrow=2) +
+  scale_y_continuous(trans='log2') +
+  ylab("log2 TMM counts")+
+  labs(caption = "Gene expression of six genes involved with Sars-CoV-2 cell entry. 
+       Gene expression was calculated based on 96 samples after
+       removing outliers detected with MDP analysis. Outliers were 
+       defineid with 1.5*IQR of samples score from MDP") +
+  theme_bw(base_size = 12)
 ```
 
