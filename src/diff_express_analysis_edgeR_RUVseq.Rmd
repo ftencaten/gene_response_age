@@ -25,9 +25,21 @@ if(!require(mdp, quietly = T)) {
   BiocManager::install("mdp")
   library(mdp) 
 }
+if(!require(RColorBrewer, quietly = T)) {
+  install.packages("RColorBrewer")
+  library(RColorBrewer) 
+}
+if(!require(pheatmap, quietly = T)) {
+  install.packages("pheatmap")
+  library(pheattmap)
+}
+if(!require(ggfortify, quietly = T)) {
+  install.packages("ggfortify")
+  library(ggfortify)
+}
 ```
 
-```{r}
+```{r Input files}
 #Raw counts file
 counts <- read.delim(here("data",
                           "gene_counts_merged_datasets_children_adults_elderly.txt"))
@@ -38,9 +50,12 @@ counts <- read.delim(here("data",
 #Raw counts corrected with Combat-seq curettage
 #counts <- read.delim(here("data","gene_counts_merged_datasets_children_adults_elderly_curettage_Combat-seq.tsv"))
 
-phenodata <- read.delim(here("data", "sample_information.txt"))
+phenodata <- read.delim(here("data", "sample_information.txt"),
+                        stringsAsFactors = T)
 
-phenodata_curettage <- read.delim(here("data","phenodata_curettage.tsv"))
+phenodata_curettage <- read.delim(here("data",
+                                       "phenodata_curettage_102samples.tsv"), 
+                                  stringsAsFactors = T)
 
 tmm <- read.delim(here("data", "tmm_counts_curettage.tsv"))
 
@@ -51,11 +66,11 @@ degs <- read.delim(here("data","diff_expression_byAge_bySex_curettage.tsv"))
 ```
 
 
-```{r Subset with MDP}
+```{r MDP outliers}
 phenodata <- phenodata[phenodata$timepoint == "baseline" & 
                        phenodata$sampling.method == "curettage",]
 
-phenodata$Group <- factor(phenodata$Group, c("Children","Adults","Older"))
+phenodata$Group <- factor(phenodata$Group, c("Children","Adults","Elderly"))
 
 hgnc <- counts[,1:2]
 
@@ -75,17 +90,17 @@ samplescore <- mdp.results$sample_scores$allgenes
  
 samplescore %>% 
   ggplot(aes(x = Class, y = Score)) +
-  geom_boxplot()
+  geom_boxplot(coef=0.2407407)
 
 rc <- boxplot.stats(samplescore[samplescore$Class == "Children",2])$out
 ra <- boxplot.stats(samplescore[samplescore$Class == "Adults",2])$out
-ro <- boxplot.stats(samplescore[samplescore$Class == "Older",2])$out
+ro <- boxplot.stats(samplescore[samplescore$Class == "Elderly",2])$out
 
 samples2drop.outliers <- subset(samplescore, Score %in% c(rc,ra,ro))
 
 samples2drop.overlap <- subset(samplescore, 
-                               Score > min(samplescore[samplescore$Class == "Older",2]) & 
-                         Class != "Older")
+                               Score > min(samplescore[samplescore$Class == "Elderly",2]) & 
+                         Class != "Elderly")
 samples2drop <- unique(c(samples2drop.outliers$Sample,
                          samples2drop.overlap$Sample))
 
@@ -100,7 +115,8 @@ counts <- subset(counts, select = as.vector(phenodata$label))
 
 ```
 
-```{r Diff expression analysis with RUVseq + edgeR}
+## Factors of unwanted variation were estimated for each comparison
+```{r DEGs RUVseq Age + Sex with pair factors}
 df <- NULL
 
 for(i in levels(phenodata$Group)) {
@@ -168,8 +184,332 @@ write.table(df, here("results", "diff_express_edgeR",
                 sep='\t',quote=F,row.names = F)
 ``` 
 
+The first round of diff express analysis was done with 113 samples. After
+normalization with RUVSeq some outliers were detected on PCA plot. To identify and remove these outliers I applied the functions in the chunk below. It was necessary two rounds of sample removing in order to have a PCA representing a homogeneous set of samples. The final list of samples was saved at 
+"phenodata_curettage_102samples.tsv".
 
-```{r Standard Diff expression analysis with edgeR}
+```{r Outlier detection}
+#from https://www.r-bloggers.com/detecting-outlier-samples-in-pca/
+U <- prcomp.ruv.norm$x
+
+ind.out <- apply(U, 2, 
+                 function(x) which( (abs(x - median(x)) / mad(x)) > 6 )) %>%
+  Reduce(union, .) %>%
+  print()
+
+col <- rep("black", nrow(U)); col[ind.out] <- "red"
+qplot(U[, 1], U[, 2], color = I(col), size = I(2)) + coord_equal()
+
+#phenodata_curettage <- phenodata_curettage[-ind.out,]
+#phenodata_curettage <- phenodata_curettage[-ind.out2,]
+
+#write.table(phenodata_curettage, 
+#            here("data","phenodata_curettage_102samples.tsv"),
+#            sep = "\t", quote=F, row.names = F)
+```
+
+## Factors of unwanted variation were estimated for all samples at once
+```{r DEG RUVseq Age + Sex with global factors}
+colors <- brewer.pal(3, "Set2")
+
+hgnc <- counts[,1:2]
+
+rownames(counts) <- counts$ID
+
+subcounts <- subset(counts, select = as.vector(phenodata_curettage$label))
+
+#Filter low expression genes
+keep <- rowSums(subcounts > 1) > ncol(subcounts)*0.5
+subcounts <- subcounts[keep,]
+
+subhgnc <- hgnc[hgnc$ID %in% rownames(subcounts),]
+
+ncounts <- newSeqExpressionSet(as.matrix(subcounts),
+                               phenoData = data.frame(Group = phenodata_curettage$Group,
+                                                      sex = phenodata_curettage$sex,
+                                                      row.names=phenodata_curettage$label))
+
+### Empirical control genes
+design <- model.matrix(~Group, data=pData(ncounts))
+y <- DGEList(counts=counts(ncounts), group=phenodata_curettage$Group)
+y <- calcNormFactors(y, method="upperquartile")
+y <- estimateGLMCommonDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y, design)
+lrt <- glmLRT(fit, coef=2:3)
+top <- topTags(lrt, n=nrow(ncounts))$table
+empirical <- rownames(ncounts)[which(!(rownames(ncounts) %in% 
+                                         rownames(top)[1:10000]))]
+###
+ncounts <- betweenLaneNormalization(ncounts, which="upper")
+
+### RUVseq norm
+ruv.norm <- RUVg(ncounts, empirical, k=4)
+
+#ruvcounts <- normCounts(ruv.norm)
+#ruvcounts <- merge(subhgnc, ruvcounts, by.x = "ID", by.y = "row.names")
+#write.table(ruvcounts, here("data","ruv_counts_curettage.tsv"),
+#            sep = "\t", quote=F, row.names = F)
+
+#Plot of Relative Log Expression
+plotRLE(ruv.norm, col = colors[factor(phenodata_curettage$Group, 
+                                    levels= c("Children","Adults", "Elderly"))], 
+        outline=FALSE, ylim=c(-4, 4), main = "RUV norm",
+        ylab= "Relative Log Expression")
+
+#plotPCA use top 500 most variant genes before prcomp, using prcomp directly instead
+#plotPCA(ruv.norm, 
+#        col=colors[factor(phenodata_curettage$Group, 
+#                          levels= c("Children","Adults", "Elderly"))],
+#        cex=1.2)
+
+# PCA plot
+ruv.norm.t <- as.data.frame(t(normCounts(ruv.norm)))
+ruv.norm.t$label <- rownames(ruv.norm.t)
+ruv.norm.t <- merge(phenodata_curettage, ruv.norm.t, by="label")
+
+prcomp.ruv.norm <- prcomp(ruv.norm.t[,-c(1:7)])
+
+autoplot(prcomp.ruv.norm , x= 1,y = 2,ruv.norm.t[,1:7], shape = 'sex', 
+         colour= 'Group', size=3) +
+  scale_color_manual(values= brewer.pal(3,"Set2")) +
+  labs(title = "RUV norm / k = 4 / 102 samples") +
+  theme_bw(base_size = 15,)
+
+
+df <- NULL
+
+for(i in levels(phenodata_curettage$Group)) {
+  for(j in levels(phenodata_curettage$sex)) {
+    
+    subphenodata <- phenodata_curettage[phenodata_curettage$Group != i &
+                                     phenodata_curettage$sex == j,]
+    subphenodata$Group <- factor(subphenodata$Group, 
+                                 as.vector(unique(subphenodata$Group)))
+    
+    samples <- subphenodata[,1]
+    
+    dpheno <- pData(ruv.norm)[samples,]
+    dpheno$Group <- factor(dpheno$Group, unique(dpheno$Group))
+    
+    design <- model.matrix(~Group + W_1 + W_2 + W_3 + W_4, data = dpheno)
+    
+    y <- DGEList(counts = counts(ruv.norm)[,samples], genes = subhgnc)
+    y <- calcNormFactors(y)
+    y <- estimateGLMCommonDisp(y, design)
+    y <- estimateGLMTagwiseDisp(y, design)
+    fit <- glmFit(y, design, robust=T)
+    degs <- topTags(glmLRT(fit, coef=2), n=NULL)$table
+    
+    ndown <- nrow(degs[degs$logFC < -1 & degs$FDR <0.01,])
+    nup <- nrow(degs[degs$logFC > 1 & degs$FDR <0.01,])
+        
+    filename <- paste0("DEGs_", levels(subphenodata$Group)[1], ".vs.",
+                       levels(subphenodata$Group)[2],
+                       ".sex_",j,"_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv")
+        
+    write.table(degs, here("results", "diff_express_edgeR" ,filename),
+                sep='\t',quote=F,row.names = F)
+        
+    df <- rbind(df, data.frame(ref = levels(subphenodata$Group)[1], 
+                               tret= levels(subphenodata$Group)[2],
+                               sex = j, Up = nup, Down = ndown))
+  }
+}
+
+write.table(df, here("results", "diff_express_edgeR",
+                     "number_DEGS_logFC1_fdr0.01_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.txt"),
+                sep='\t',quote=F,row.names = F)
+
+#Plot expression
+ruv.norm.t <- as.data.frame(t(normCounts(ruv.norm)))
+
+ruv.norm.t$label <- rownames(ruv.norm.t)
+ruv.norm.t <- merge(phenodata_curettage, ruv.norm.t, by="label")
+x <- ruv.norm.t %>% 
+  pivot_longer(-colnames(ruv.norm.t[,1:7]), 
+               names_to = "ensemblID", values_to = "values") %>%
+  left_join(hgnc, by= c("ensemblID" = "ID"))
+
+genes <- c("ACE2","TMPRSS2","FURIN","ANPEP","CTSL","CTSB")
+genes <- c("TMPRSS2","FURIN")
+
+x %>%
+  mutate(values = log2(values + 1)) %>% 
+  filter(nameofG %in% genes) %>%
+  mutate(Group = fct_relevel(Group, "Children","Adults","Elderly")) %>%
+  mutate(nameofG = fct_relevel(nameofG, genes)) %>%
+  ggplot(aes(x = Group, y = values, fill = sex), cex=1.5) +
+  geom_boxplot(position= "dodge", outlier.shape = NA) +
+  facet_wrap(vars(nameofG),ncol =3) +
+  ylab("log2 RUV norm")+
+  labs(title = "k = 4 / 102 samples")+
+  theme_bw(base_size = 12)
+  scale_y_continuous(limits = c(9,12))
+
+####### Calculate expression by SEX within groups
+
+df <- NULL
+
+for(i in levels(phenodata_curettage$Group)) {
+    
+    subphenodata <- phenodata_curettage[phenodata_curettage$Group == i,]
+
+    samples <- subphenodata[,1]
+    
+    dpheno <- pData(ruv.norm)[samples,]
+    dpheno$Group <- factor(dpheno$Group, unique(dpheno$Group))
+    
+    design <- model.matrix(~sex + W_1 + W_2 + W_3 + W_4, data = dpheno)
+    
+    y <- DGEList(counts = counts(ruv.norm)[,samples], genes = subhgnc)
+    y <- calcNormFactors(y)
+    y <- estimateGLMCommonDisp(y, design)
+    y <- estimateGLMTagwiseDisp(y, design)
+    fit <- glmFit(y, design, robust=T)
+    degs <- topTags(glmLRT(fit, coef=2), n=NULL)$table
+    
+    ndown <- nrow(degs[degs$logFC < -1 & degs$FDR <0.01,])
+    nup <- nrow(degs[degs$logFC > 1 & degs$FDR <0.01,])
+        
+    filename <- paste0("DEGs_", levels(subphenodata$sex)[1], ".vs.",
+                       levels(subphenodata$sex)[2], "_", levels(dpheno$Group), "_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv")
+        
+    write.table(degs, here("results", "diff_express_edgeR" ,filename),
+                sep='\t',quote=F,row.names = F)
+        
+    df <- rbind(df, data.frame(ref = levels(subphenodata$sex)[1], 
+                               tret= levels(subphenodata$sex)[2],
+                               Group = levels(dpheno$Group), 
+                               Up = nup, Down = ndown))
+}
+
+write.table(df, here("results", "diff_express_edgeR",
+                     "number_DEGS_logFC1_fdr0.01_glmLRT_RUVg_k4_empirical_control_all_groups_102samples_FvsM.txt"),
+                sep='\t',quote=F,row.names = F)  
+  
+out <- as.data.frame(normCounts(ruv.norm))
+
+out$ID <- rownames(out)
+out <- merge(subhgnc, out, by="ID")
+
+write.table(out, here("results","counts_ruv-norm_k3.tsv"), 
+            sep = "\t", quote = F, row.names = F)
+``` 
+
+## Factors of unwanted variation estimated for all samples at once and comparison just between age groups
+```{r DEG RUVseq Age with global factors}
+colors <- brewer.pal(3, "Set2")
+
+hgnc <- counts[,1:2]
+
+rownames(counts) <- counts$ID
+
+subcounts <- subset(counts, select = as.vector(phenodata_curettage$label))
+
+#Filter low expression genes
+keep <- rowSums(subcounts > 1) > ncol(subcounts)*0.5
+subcounts <- subcounts[keep,]
+
+subhgnc <- hgnc[hgnc$ID %in% rownames(subcounts),]
+
+ncounts <- newSeqExpressionSet(as.matrix(subcounts),
+                               phenoData = data.frame(Group = phenodata_curettage$Group,
+                                                      sex = phenodata_curettage$sex,
+                                                      row.names=phenodata_curettage$label))
+
+### Empirical control genes
+design <- model.matrix(~Group, data=pData(ncounts))
+y <- DGEList(counts=counts(ncounts), group=phenodata_curettage$Group)
+y <- calcNormFactors(y, method="upperquartile")
+y <- estimateGLMCommonDisp(y, design)
+y <- estimateGLMTagwiseDisp(y, design)
+fit <- glmFit(y, design)
+lrt <- glmLRT(fit, coef=2:3)
+top <- topTags(lrt, n=nrow(ncounts))$table
+empirical <- rownames(ncounts)[which(!(rownames(ncounts) %in% 
+                                         rownames(top)[1:10000]))]
+###
+ncounts <- betweenLaneNormalization(ncounts, which="upper")
+
+### RUVseq norm
+ruv.norm <- RUVg(ncounts, empirical, k=4)
+
+#ruvcounts <- normCounts(ruv.norm)
+#ruvcounts <- merge(subhgnc, ruvcounts, by.x = "ID", by.y = "row.names")
+#write.table(ruvcounts, here("data","ruv_counts_curettage.tsv"),
+#            sep = "\t", quote=F, row.names = F)
+
+#Plot of Relative Log Expression
+plotRLE(ruv.norm, col = colors[factor(phenodata_curettage$Group, 
+                                    levels= c("Children","Adults", "Elderly"))], 
+        outline=FALSE, ylim=c(-4, 4), main = "RUV norm",
+        ylab= "Relative Log Expression")
+
+#plotPCA use top 500 most variant genes before prcomp, using prcomp directly instead
+#plotPCA(ruv.norm, 
+#        col=colors[factor(phenodata_curettage$Group, 
+#                          levels= c("Children","Adults", "Elderly"))],
+#        cex=1.2)
+
+# PCA plot
+ruv.norm.t <- as.data.frame(t(normCounts(ruv.norm)))
+ruv.norm.t$label <- rownames(ruv.norm.t)
+ruv.norm.t <- merge(phenodata_curettage, ruv.norm.t, by="label")
+
+prcomp.ruv.norm <- prcomp(ruv.norm.t[,-c(1:7)])
+
+autoplot(prcomp.ruv.norm , x= 1,y = 2,ruv.norm.t[,1:7], shape = 'sex', 
+         colour= 'Group', size=3) +
+  scale_color_manual(values= brewer.pal(3,"Set2")) +
+  labs(title = "RUV norm / k = 4 / 102 samples") +
+  theme_bw(base_size = 15,)
+
+
+df <- NULL
+
+for(i in levels(phenodata_curettage$Group)) {
+    
+    subphenodata <- phenodata_curettage[phenodata_curettage$Group != i,]
+    subphenodata$Group <- factor(subphenodata$Group, 
+                                 as.vector(unique(subphenodata$Group)))
+    
+    samples <- subphenodata[,1]
+    
+    dpheno <- pData(ruv.norm)[samples,]
+    dpheno$Group <- factor(dpheno$Group, unique(dpheno$Group))
+    
+    design <- model.matrix(~Group + W_1 + W_2 + W_3 + W_4, data = dpheno)
+    
+    y <- DGEList(counts = counts(ruv.norm)[,samples], genes = subhgnc)
+    y <- calcNormFactors(y)
+    y <- estimateGLMCommonDisp(y, design)
+    y <- estimateGLMTagwiseDisp(y, design)
+    fit <- glmFit(y, design, robust=T)
+    degs <- topTags(glmLRT(fit, coef=2), n=NULL)$table
+    
+    ndown <- nrow(degs[degs$logFC < -1 & degs$FDR <0.01,])
+    nup <- nrow(degs[degs$logFC > 1 & degs$FDR <0.01,])
+        
+    filename <- paste0("DEGs_", levels(subphenodata$Group)[1], ".vs.",
+                       levels(subphenodata$Group)[2],
+              "_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv")
+        
+    write.table(degs, here("results", "diff_express_edgeR" ,filename),
+                sep='\t',quote=F,row.names = F)
+        
+    df <- rbind(df, data.frame(ref = levels(subphenodata$Group)[1], 
+                               treat= levels(subphenodata$Group)[2],
+                              Up = nup, Down = ndown))
+}
+
+write.table(df, here("results", "diff_express_edgeR",
+                     "number_DEGS_logFC1_fdr0.01_glmLRT_RUVg_k4_empirical_control_all_groups_102samples_only_byAge.txt"),
+                sep='\t',quote=F,row.names = F)
+```
+
+
+```{r DEGs standard edgeR}
 design <- model.matrix(~0 + Group:sex, data=phenodata)
     
 y <- DGEList(counts = counts, genes = hgnc,
@@ -483,13 +823,13 @@ write.table(out, here("data","TMM_expression_byAge_bySex_curettage.tsv"),
             sep = "\t", quote = F, row.names = F)
 ```
 
-```{r}
-adults.vs.children.f <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Adults.sex_F_glmLRT_RUVg_empirical_control.tsv"))
-adults.vs.children.m <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Adults.sex_M_glmLRT_RUVg_empirical_control.tsv"))
-elderly.vs.children.f <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Older.sex_F_glmLRT_RUVg_empirical_control.tsv"))
-elderly.vs.children.m <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Older.sex_M_glmLRT_RUVg_empirical_control.tsv"))
-elderly.vs.adults.f <- read.delim(here("results","diff_express_edgeR","DEGs_Adults.vs.Older.sex_F_glmLRT_RUVg_empirical_control.tsv"))
-elderly.vs.adults.m <- read.delim(here("results","diff_express_edgeR","DEGs_Adults.vs.Older.sex_M_glmLRT_RUVg_empirical_control.tsv"))
+```{r Join RUVseq results}
+adults.vs.children.f <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Adults.sex_F_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+adults.vs.children.m <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Adults.sex_M_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+elderly.vs.children.f <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Elderly.sex_F_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+elderly.vs.children.m <- read.delim(here("results","diff_express_edgeR","DEGs_Children.vs.Elderly.sex_M_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+elderly.vs.adults.f <- read.delim(here("results","diff_express_edgeR","DEGs_Adults.vs.Elderly.sex_F_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+elderly.vs.adults.m <- read.delim(here("results","diff_express_edgeR","DEGs_Adults.vs.Elderly.sex_M_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
 
 
 out2 <- adults.vs.children.f %>%
@@ -502,6 +842,9 @@ out2 <- adults.vs.children.f %>%
   #full_join(m.vs.f.adults, by = c("ID","nameofG"), suffix = c(".M.vs.F.Children", ".M.vs.F.Adults")) %>%
   #full_join(dplyr::rename(m.vs.f.elderly, logFC.M.vs.F.Elderly = logFC, logCPM.M.vs.F.Elderly = logCPM, F.M.vs.F.Elderly = F, PValue.M.vs.F.Elderly = PValue, FDR.M.vs.F.Elderly = FDR), by = c("ID","nameofG"))
 
+out <- read.delim(here("data", "ruv_counts_curettage.tsv"))
+
+rownames(out) <- out$ID
 out <- out[,-c(1:2)]
 out <- as.data.frame(t(out))
 
@@ -516,16 +859,105 @@ out3 <- phenodata %>%
    inner_join(out2, by = c("genes" = "ID")) %>%
    select(-starts_with(c("logCPM.", "LR."))) %>%
    select(ID = genes, nameofG,RUVseq_Adults_M = Adults_M, RUVseq_Adults_F = Adults_F, 
-          RUVseq_Children_F = Children_F, RUVseq_Children_M = Children_M, RUVseq_Elderly_M = Older_M,
-          RUVseq_Elderly_F = Older_F, everything())
+          RUVseq_Children_F = Children_F, RUVseq_Children_M = Children_M, RUVseq_Elderly_M = Elderly_M,
+          RUVseq_Elderly_F = Elderly_F, everything())
 
-write.table(out3, here("data","RUVSeq_diff_expression_byAge_bySex_curettage.tsv"), sep = "\t",
-            quote = F, row.names = F)
+write.table(out3, here("results",
+                       "RUVSeq_k4_diff_expression_byAge_bySex_curettage.tsv"),
+            sep = "\t", quote = F, row.names = F)
+```
+
+```{r Join RUVseq results only by Age groups}
+children.vs.adults <- read.delim(here("results", "diff_express_edgeR",
+"DEGs_Children.vs.Adults_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+
+children.vs.adults <- children.vs.adults %>% 
+  mutate(ctrl = "Children", treat = "Adults")
+
+children.vs.elderly <- read.delim(here("results", "diff_express_edgeR", "DEGs_Children.vs.Elderly_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+
+children.vs.elderly <- children.vs.elderly %>% 
+  mutate(ctrl = "Children", treat = "Elderly")
+
+adults.vs.elderly <- read.delim(here("results", "diff_express_edgeR", "DEGs_Adults.vs.Elderly_glmLRT_RUVg_k4_empirical_control_all_groups_102samples.tsv"))
+
+adults.vs.elderly  <- adults.vs.elderly  %>% 
+  mutate(ctrl = "Adults", treat = "Elderly")
+
+out <- rbind(children.vs.adults, children.vs.elderly, adults.vs.elderly)
+out <- out %>%
+  select(ID, nameofG, ctrl, treat, everything()) %>% 
+  select(-c(6:7)) %>% 
+  arrange(ID)
+  
+write.table(out, here("results",
+                       "RUVSeq_k4_diff_expression_byAge_curettage_tidy.tsv"),
+            sep = "\t", quote = F, row.names = F)
+```
+
+
+
+```{r}
+rownames(tmm) <- tmm$ID
+
+#filter low expression genes
+keep <- rowSums(tmm > 1) > ncol(tmm[,-c(1:2)])*0.5
+subtmm <- tmm[keep,]
+
+hgnc <- subtmm[,1:2]
+
+subtmm.t <- as.data.frame(t(subtmm[,-c(1:2)]))
+
+subtmm.t$label <- rownames(subtmm.t)
+subtmm.t <- merge(phenodata_curettage, subtmm.t, by="label")
+
+subtmm.t <- subtmm.t[,c(colnames(subtmm.t[,1:7]),selectedGenes)]
+#pca
+prcom.subtmm <- prcomp(subtmm.t[,-c(1:7)])
+
+autoplot(prcom.subtmm , subtmm.t, shape = 'sex', 
+         colour= 'Group', size=3) +
+  scale_color_manual(values= brewer.pal(3,"Set2")) +
+  labs(title = "TMM") +
+  theme_bw(base_size = 15,)
+
+prcom.subtmm <- prcomp(subtmm.t[selectedGenes,-c(1:7)])
+
+autoplot(prcom.subtmm , subtmm.t, shape = 'sex', 
+         colour= 'Group', size=3) +
+  scale_color_manual(values= brewer.pal(3,"Set2")) +
+  labs(title = "TMM") +
+  theme_bw(base_size = 15,)
+
+
+
+settmm <- newSeqExpressionSet(as.matrix(subtmm[,-c(1:2)]),
+                           phenoData = data.frame(phenodata_curettage$Group,
+                                                  row.names=colnames(subtmm[,-c(1:2)])))
+colors <- brewer.pal(3, "Set2")
+
+png(width = 888, height = 500, "RLE_TMM.png")
+plotRLE(settmm, col = colors[factor(phenodata_curettage$Group, 
+                                    levels= c("Children","Adults", "Elderly"))], 
+        outline=FALSE, ylim=c(-4, 4), main = "TMM ",
+        ylab= "Relative Log Expression")
+legend("topright",legend = c("Children", "Adults", "Elderly"), 
+       col = colors, pch = 15,pt.cex = 1.5, cex = 1.2, ncol=1)
+dev.off()
+
+plotPCA(settmm, col=colors[as.factor(phenodata_curettage$Group)], cex=1.2)
+
+selectedGenes <- names(sort(apply(counts(settmm), 1, var), decreasing = T)[1:2000])
+pheatmap(counts(settmm[selectedGenes,]), 
+             scale = 'row',
+             #cutree_cols = 3, 
+             show_rownames = FALSE,)
 
 
 ```
 
-```{r}
+
+```{r TMM gene expression 96 samples}
 # TMM counts with y DGEList object from standard diff express analysis
 tmm <- as.data.frame(cpm(y))
 
@@ -556,3 +988,81 @@ x %>%
   theme_bw(base_size = 12)
 ```
 
+## IFN and ISG Children vs Elderly M and F
+```{r}
+deg <- read.delim(here("results",
+                       "RUVSeq_k4_diff_expression_byAge_bySex_curettage.tsv"))
+isg <- read.delim(here("data", "isg_genes.txt"))
+
+deg.tidy <- deg %>% 
+  select(-starts_with("RUV")) %>% 
+  pivot_longer(-c(1:2),names_to = "method", values_to = "result") %>% 
+  separate(method, c("metric","treat","vs","ctrl","sex"), sep = "([.])") %>% 
+  select(-vs) %>% 
+  pivot_wider(names_from = metric, values_from = result) %>% 
+  select(ID, nameofG, ctrl, everything())
+
+write.table(deg.tidy, here("results", 
+                    "RUVSeq_k4_diff_expression_byAge_bySex_curettage_tidy.tsv"),
+            sep = "\t", quote = F, row.names = F)
+
+norm.count <- deg %>% 
+  select(ID, nameofG,starts_with("RUV"))
+
+write.table(norm.count, here("data", 
+                    "ruv_counts_curettage_byAge_bySex.tsv"),
+            sep = "\t", quote = F, row.names = F)
+
+isg.deg <- deg.tidy %>% 
+  filter(nameofG %in% isg$genes) %>% 
+  filter(ctrl == "Children", treat == "Elderly") %>% 
+  mutate(deg = case_when(logFC > 1 & FDR < 0.05 ~ "up",
+                         logFC < -1 & FDR < 0.05 ~ "down"),) 
+
+write.table(isg.deg, here("results", "degs_ISGs.tsv"), 
+            sep = "\t", quote = F, row.names = F)
+
+isg.deg %>% 
+  filter(deg %in% c("up","down")) %>% 
+  group_by(sex, deg) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = deg, y = n)) +
+  geom_bar(aes(fill = sex),stat = "identity", position = "dodge",
+           color = "black", width = 0.6) +
+  scale_fill_manual(values =c("#ef8a62","#67a9cf")) +
+  scale_x_discrete (labels = c("Down", "Up")) + 
+  labs(title = "ISGs    |logFC| > 1 & FDR < 0.05",y = "# DEGs", x = "") +
+  theme_bw() +
+  theme(text = element_text(size = 13))
+
+```
+
+## IFN and ISG Children vs Elderly
+```{r}
+deg.tidy <- read.delim(here("results",
+                       "RUVSeq_k4_diff_expression_byAge_curettage_tidy.tsv"))
+isg <- read.delim(here("data", "isg_genes.txt"))
+
+isg.deg <- deg.tidy %>% 
+  filter(nameofG %in% isg$genes) %>% 
+  filter(ctrl == "Children", treat == "Elderly") %>% 
+  mutate(deg = case_when(logFC > 1 & FDR < 0.05 ~ "up",
+                         logFC < -1 & FDR < 0.05 ~ "down"),) 
+
+write.table(isg.deg, here("results", "degs_ISGs_byAgeGroup.tsv"), 
+            sep = "\t", quote = F, row.names = F)
+
+isg.deg %>% 
+  filter(deg %in% c("up","down")) %>% 
+  group_by(deg) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = deg, y = n)) +
+  geom_bar(aes(fill = deg),stat = "identity", color = "black", width = 0.5) +
+  scale_fill_manual(values =c("#ef8a62","#67a9cf")) +
+  scale_x_discrete (labels = c("Down", "Up")) + 
+  labs(title = "ISGs - |logFC| > 1 & FDR < 0.05\nChildren vs Elderly",
+       y = "# DEGs", x = "") +
+  theme_bw() +
+  theme(legend.position="none" ,text = element_text(size = 13))
+
+```

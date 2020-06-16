@@ -17,15 +17,15 @@ if(!require(CEMiTool, quietly = F)) {
   library(CEMiTool)
 }
 if(!require(clusterProfiler, quietly = F)) {
-  BiocManager::install("clusterProfiler")
+    BiocManager::install("clusterProfiler")
   library(clusterProfiler)
 }
 ```
 
 ```{r Load input files}
-tmm.counts <- read.delim(here("data","tmm_counts_curettage.tsv"))
+counts <- read.delim(here("data","ruv_counts_curettage.tsv"))
 
-phenodata <- read.delim(here("data","phenodata_curettage.tsv"))
+phenodata <- read.delim(here("data","phenodata_curettage_102samples.tsv"))
 
 my_gmt <- read.gmt(gmtfile = here("data", "ReactomePathwaysLevel3.gmt"))
 
@@ -37,8 +37,8 @@ int_df <- read.delim(int_fname)
 ```
 
 ```{r Prepare files}
-tmm.counts <- tmm.counts[!duplicated(tmm.counts$nameofG),]
-rownames(tmm.counts) <- tmm.counts$nameofG
+counts <- counts[!duplicated(counts$nameofG),]
+rownames(counts) <- counts$nameofG
 
 smpl.annot <- data.frame(SampleName = phenodata$label, 
                     Class = interaction(phenodata$Group, phenodata$sex))
@@ -57,14 +57,29 @@ smpl.annot$Class <- fct_relevel(smpl.annot$Class, "Children.F", "Children.M",
 keep <- rowSums(tmm.counts[,-c(1:2)] > 1) > ncol(tmm.counts[,-c(1:2)])*0.5
 tmm.counts <- tmm.counts[keep,]
 
-#Run CEMiTool
+#Run CEMiTool with filter
+cem.ruv <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot,
+                    verbose = TRUE, gmt = my_gmt, filter_pval = 0.3,
+                    interactions = int_df, gsea_max_size = 7e3)
+
+# create report as html document
+generate_report(cem.ruv, 
+                directory = here("results", "CEMiTool", "report_filter03"),
+                title = "Children - Adults - Elderly / M - F / Filter 0.3")
+
+save_plots(cem.ruv, "all", 
+           directory = here("results","CEMiTool","plots_filter03"))
+
+
+#Run CEMiTool without filter
 cem.tmm.no.filter <- cemitool(expr = tmm.counts[,-c(1:2)], annot = smpl.annot, 
                               verbose = TRUE, filter = FALSE, gmt = my_gmt, 
                               interactions = int_df, gsea_max_size = 7e3)
 
+
 # create report as html document
 generate_report(cem.tmm.no.filter, 
-                directory = here("results", "CEMiTool", "report_nofilter"),
+                directory = here("results", "CEMiTool", "report_nofilter_gmt_in"),
                 title = "Children - Adults - Elderly / M - F / No filter")
 
 # write analysis results into files
