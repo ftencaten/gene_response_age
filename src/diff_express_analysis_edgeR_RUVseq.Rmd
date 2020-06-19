@@ -115,7 +115,7 @@ counts <- subset(counts, select = as.vector(phenodata$label))
 
 ```
 
-## Factors of unwanted variation were estimated for each comparison
+## Factors of unwanted variation estimated for each comparison
 ```{r DEGs RUVseq Age + Sex with pair factors}
 df <- NULL
 
@@ -208,7 +208,7 @@ qplot(U[, 1], U[, 2], color = I(col), size = I(2)) + coord_equal()
 #            sep = "\t", quote=F, row.names = F)
 ```
 
-## Factors of unwanted variation were estimated for all samples at once
+## Factors of unwanted variation estimated for all samples at once
 ```{r DEG RUVseq Age + Sex with global factors}
 colors <- brewer.pal(3, "Set2")
 
